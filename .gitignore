@@ -1,0 +1,8 @@
+.venv
+*.pyc
+__pycache__
+.vscode
+coverage.*
+.coverage
+example
+htmlcov

@@ -1,0 +1,223 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema",
+  "$id": "FeaFea",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "flags": {
+      "type": "object",
+      "additionalProperties": false,
+      "patternProperties": {
+        "^[a-zA-Z_][a-zA-Z0-9_]*$": {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "variants": {
+                  "oneOf": [
+                    {
+                      "type": "array",
+                      "items": {
+                        "type": "boolean",
+                        "enum": [
+                          true,
+                          false
+                        ]
+                      },
+                      "minItems": 2,
+                      "maxItems": 2,
+                      "uniqueItems": true
+                    },
+                    {
+                      "type": "array",
+                      "items": {
+                        "type": "integer"
+                      },
+                      "minItems": 2,
+                      "uniqueItems": true
+                    },
+                    {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "pattern": "^[a-zA-Z_][a-zA-Z0-9_]*$"
+                      },
+                      "minItems": 2,
+                      "uniqueItems": true
+                    }
+                  ]
+                },
+                "default": {
+                  "type": [
+                    "string",
+                    "integer",
+                    "boolean"
+                  ]
+                },
+                "metadata": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "patternProperties": {
+                    "^[a-zA-Z_][a-zA-Z0-9_]*$": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  }
+                }
+              },
+              "required": [
+                "variants",
+                "default"
+              ]
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "alias": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "alias"
+              ]
+            }
+          ]
+        }
+      }
+    },
+    "filters": {
+      "type": "object",
+      "additionalProperties": false,
+      "patternProperties": {
+        "^[a-zA-Z_][a-zA-Z0-9_]*$": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "rules": {
+      "type": "object",
+      "additionalProperties": false,
+      "patternProperties": {
+        "^[a-zA-Z_][a-zA-Z0-9_]*$": {
+          "type": "object",
+          "additionalProperties": false,
+          "oneOf": [
+            {
+              "required": [
+                "variants"
+              ],
+              "not": {
+                "required": [
+                  "split_group"
+                ]
+              }
+            },
+            {
+              "required": [
+                "splits"
+              ]
+            }
+          ],
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "filter": {
+              "type": "string"
+            },
+            "variants": {
+              "type": "object",
+              "additionalProperties": false,
+              "minProperties": 1,
+              "patternProperties": {
+                "^[a-zA-Z_][a-zA-Z0-9_]*$": {
+                  "type": [
+                    "string",
+                    "integer",
+                    "boolean"
+                  ]
+                }
+              }
+            },
+            "splits": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "pattern": "^[a-zA-Z_][a-zA-Z0-9_]*$"
+                  },
+                  "percentage": {
+                    "type": "number",
+                    "exclusiveMinimum": 0,
+                    "exclusiveMaximum": 100
+                  },
+                  "variants": {
+                    "type": "object",
+                    "minProperties": 1,
+                    "additionalProperties": {
+                      "type": [
+                        "string",
+                        "integer",
+                        "boolean"
+                      ]
+                    }
+                  }
+                },
+                "required": [
+                  "percentage"
+                ]
+              }
+            },
+            "split_group": {
+              "type": "string",
+              "pattern": "^[a-zA-Z_][a-zA-Z0-9_]*$"
+            },
+            "priority": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "schedule": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "start": {
+                  "type": "string"
+                },
+                "end": {
+                  "type": "string"
+                },
+                "ramp_up": {
+                  "type": "string"
+                },
+                "ramp_down": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "start",
+                "end"
+              ]
+            },
+            "metadata": {
+              "type": "object",
+              "additionalProperties": false,
+              "patternProperties": {
+                "^[a-zA-Z_][a-zA-Z0-9_]*$": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
