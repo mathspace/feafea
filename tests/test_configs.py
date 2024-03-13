@@ -76,10 +76,6 @@ class TestValidConfig(unittest.TestCase):
             {
                 "flags": {
                     "a": {
-                        "variants": [
-                            True,
-                            False,
-                        ],
                         "default": True,
                         "metadata": {
                             "category": "simple",
@@ -342,7 +338,6 @@ class TestValidConfig(unittest.TestCase):
         tpl_config = {
             "flags": {
                 "a": {
-                    "variants": [True, False],
                     "default": False,
                 },
             },
@@ -399,11 +394,12 @@ class TestInvalidConfigs(unittest.TestCase):
 
         cases = [
             ({}, ValidationError, "."),
-            ({"variants": [True], "default": True}, ValidationError, "."),  # <2 variants
+            ({"variants": ["only"], "default": "only"}, ValidationError, "."),  # <2 variants
             ({"variants": [1, 2]}, ValidationError, "."),  # no default
             ({"variants": [1, 2], "default": 3}, ValueError, "must be one of the variants"),  # default not in variants
             ({"variants": [1, 2], "default": 1, "metadata": "not a dict"}, ValidationError, "."),
             ({"variants": [1, 2, "a"], "default": 1}, ValidationError, "."),
+            ({"variants": [True, False], "default": True}, ValidationError, "."),  # bool with variants
             ({"variants": [1, 2, 2], "default": 1}, ValidationError, "."),  # duplicate variants
             ({"alias": "non_existing"}, ValueError, "unknown flag"),
         ]

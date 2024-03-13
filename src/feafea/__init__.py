@@ -644,10 +644,13 @@ class CompiledConfig:
                 continue
             flag = CompiledFlag()
             flag.name = flag_name
-            if f["default"] not in f["variants"]:
-                raise ValueError("flag default value must be one of the variants")
+            if isinstance(f["default"], bool):
+                flag.variants = {True, False}
+            else:
+                if f["default"] not in f["variants"]:
+                    raise ValueError("flag default value must be one of the variants")
+                flag.variants = set(f["variants"])
             flag.type = type(f["default"])
-            flag.variants = set(f["variants"])
             flag.default = f["default"]
             flag.metadata = f.get("metadata", {})
             flag._rules = []

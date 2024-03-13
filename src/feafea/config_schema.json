@@ -19,19 +19,6 @@
                     {
                       "type": "array",
                       "items": {
-                        "type": "boolean",
-                        "enum": [
-                          true,
-                          false
-                        ]
-                      },
-                      "minItems": 2,
-                      "maxItems": 2,
-                      "uniqueItems": true
-                    },
-                    {
-                      "type": "array",
-                      "items": {
                         "type": "integer"
                       },
                       "minItems": 2,
@@ -66,10 +53,29 @@
                   }
                 }
               },
-              "required": [
-                "variants",
-                "default"
-              ]
+              "if": {
+                "properties": {
+                  "default": {
+                    "type": [
+                      "boolean"
+                    ]
+                  }
+                },
+                "required": [
+                  "default"
+                ]
+              },
+              "then": {
+                "required": [
+                  "default"
+                ]
+              },
+              "else": {
+                "required": [
+                  "variants",
+                  "default"
+                ]
+              }
             },
             {
               "type": "object",

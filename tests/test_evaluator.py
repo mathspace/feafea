@@ -12,7 +12,6 @@ class TestEvaluator(unittest.TestCase):
             {
                 "flags": {
                     "a": {
-                        "variants": [True, False],
                         "default": False,
                     },
                     "b": {
@@ -79,7 +78,6 @@ class TestEvaluator(unittest.TestCase):
             {
                 "flags": {
                     "a": {
-                        "variants": [True, False],
                         "default": False,
                     },
                 },
@@ -89,7 +87,6 @@ class TestEvaluator(unittest.TestCase):
             {
                 "flags": {
                     "a": {
-                        "variants": [True, False],
                         "default": False,
                     },
                 },
