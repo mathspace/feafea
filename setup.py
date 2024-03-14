@@ -18,6 +18,10 @@ setup(
     url="https://github.com/mathspace/feafea",
     package_dir={"": "src"},
     packages=find_packages(where="src"),
+    include_package_data=True,
+    package_data={
+        "feafea": ["config_shema.json"],
+    },
     install_requires=read_requirements(),
     classifiers=[
         "Programming Language :: Python :: 3",
