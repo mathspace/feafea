@@ -79,6 +79,8 @@ class TestValidConfig(unittest.TestCase):
                         "default": True,
                         "metadata": {
                             "category": "simple",
+                            "deprecated": False,
+                            "revision": 22,
                         },
                     },
                     "b": {
@@ -244,7 +246,7 @@ class TestValidConfig(unittest.TestCase):
 
     def test_valid_config_high_level(self):
         self.assertSetEqual(set(self._valid_config.flags), {"a", "b", "c", "cc", "d", "e", "f", "g", "gg"})
-        self.assertDictEqual(self._valid_config.flags["a"].metadata, {"category": "simple"})
+        self.assertDictEqual(self._valid_config.flags["a"].metadata, {"category": "simple", "deprecated": False, "revision": 22})
         self.assertEqual(self._valid_config.flags["a"].name, "a")
         self.assertTrue(self._valid_config.flags["a"].type == bool)
         self.assertEqual(self._valid_config.flags["a"].default, True)
