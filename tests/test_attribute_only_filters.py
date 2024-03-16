@@ -120,6 +120,21 @@ class TestAttributeOnlyFilters(unittest.TestCase):
                     fs.parse("f", filter)
                     fs.compile("f", {}, {})
 
+    def test_invalid_attributes(self):
+        cases = [
+            ("8 in attr:a", {"a": "not_a_set"}),
+            ("attr:a > 8", {"a": set([1, 2, 3])}),
+        ]
+        for filter, attrs in cases:
+            with self.subTest(filter):
+                fs = _FilterSet()
+                # Invalid attribute usage causes an exception. By adding an "OR
+                # true" we ensure that a false evaluation is due to the invalid
+                # attribute and not the filter itself.
+                fs.parse("f", f"({filter}) or attr:true")
+                cf = fs.compile("f", {}, {})
+                self.assertFalse(cf.eval("", {**attrs, "true": True}))
+
     def test_invalid_symbol_names(self):
         cases = [
             "naked",
