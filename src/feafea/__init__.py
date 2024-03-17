@@ -15,6 +15,8 @@ from typing import Any, Iterable, Literal
 from copy import deepcopy
 from hashlib import md5
 
+from prometheus_client import Counter, Histogram
+
 
 logger = logging.getLogger(__name__)
 
@@ -906,6 +908,20 @@ class Exporter:
     def export(self, entries: list[FlagEvaluation]) -> None: ...
 
 
+_prom_labels = ["flag", "variant", "default", "rule", "reason", "split"]
+_prom_eval_counter = Counter(
+    name="feafea_evaluations",
+    documentation="Number of flag evaluations",
+    labelnames=_prom_labels,
+)
+_prom_eval_duration = Histogram(
+    "feafea_evaluation_seconds",
+    "Flag evaluation duration in seconds",
+    buckets=[0.00001, 0.00005, 0.0001, 0.0005, 0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1, 5],
+    labelnames=_prom_labels,
+)
+
+
 class Evaluator:
     """
     The evaluator is responsible for evaluating feature flags and rules. It also
@@ -999,6 +1015,18 @@ class Evaluator:
     def _export_block_id(self, t: float) -> int:
         return (int(t) // self._export_block_seconds) * self._export_block_seconds
 
+    def _record_eval_metrics(self, e: FlagEvaluation, dur: float):
+        labels = {
+            "flag": e.flag,
+            "variant": str(e.variant),
+            "default": str(e.default),
+            "rule": e.rule,
+            "reason": e.reason,
+            "split": e.split,
+        }
+        _prom_eval_counter.labels(**labels).inc()
+        _prom_eval_duration.labels(**labels).observe(dur)
+
     def detailed_evaluate_all(self, names: Iterable[str], id: str, attributes: Attributes = {}) -> dict[str, FlagEvaluation]:
         """
         Evaluate all flags for the given id and attributes and return
@@ -1018,7 +1046,10 @@ class Evaluator:
             flag = config.flags.get(name)
             if flag is None:
                 raise ValueError(f"Flag {name} does not exist in the config")
+            start = time.perf_counter()
             e = flag.eval(id, merged_attributes)
+            dur = time.perf_counter() - start
+            self._record_eval_metrics(e, dur)
             fe[name] = e
 
         # Export evaluations
