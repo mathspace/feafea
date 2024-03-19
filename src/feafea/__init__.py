@@ -496,7 +496,6 @@ def a(target_id, attributes):
     try:
         return {py_expr}
     except Exception as e:
-        # TODO report the error
         return False
 """
         py_code = compile(code_str, "", "exec")
@@ -1092,6 +1091,11 @@ class ConfigRetrieval:
     last_modified_time: float | None
     etag: Any
 
+    def __init__(self, compiled_config: CompiledConfig, last_modified_time: float | None = None, etag: Any = None):
+        self.compiled_config = compiled_config
+        self.last_modified_time = last_modified_time
+        self.etag = etag
+
 
 class ConfigRetriever:
     @abstractmethod
@@ -1139,12 +1143,8 @@ class FileConfigRetriever(ConfigRetriever):
         mtime = os.path.getmtime(path)
         if etag is not None and mtime <= etag:
             return None
-        cr = ConfigRetrieval()
         with open(path, "rb") as f:
-            cr.etag = mtime
-            cr.last_modified_time = mtime
-            cr.compiled_config = self._decode(f.read())
-            return cr
+            return ConfigRetrieval(compiled_config=self._decode(f.read()), last_modified_time=mtime, etag=mtime)
 
 
 class AutoLoader:
