@@ -916,7 +916,7 @@ _prom_eval_counter = Counter(
 _prom_eval_duration = Histogram(
     "feafea_evaluation_seconds",
     "Flag evaluation duration in seconds",
-    buckets=[0.00001, 0.00005, 0.0001, 0.0005, 0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1, 5],
+    buckets=[1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1],
     labelnames=_prom_labels,
 )
 
