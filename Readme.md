@@ -19,13 +19,12 @@ Define a feature flag config and store it in a file `features.json`:
 {
   "flags": {
     "enable_new_feature": {
-      "variants": [true, false],
       "default": false
     }
   },
   "rules": {
     "new_feature_override": {
-      "filter": "department_id in [1,2,3]",
+      "filter": "attr:department_id in [1,2,3]",
       "variants": {
         "enable_new_feature": true
       }
