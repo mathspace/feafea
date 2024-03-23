@@ -36,10 +36,10 @@ class TestEvaluator(unittest.TestCase):
             }
         )
 
-    def test_evaluator_evaluation(self):
+    def test_local_evaluator_evaluation(self):
         evaluator = Evaluator()
 
-        with self.assertRaisesRegex(ValueError, "No active config available"):
+        with self.assertRaisesRegex(RuntimeError, "config not loaded"):
             evaluator.evaluate("a", "")
 
         evaluator.load_config(self._valid_config)
@@ -72,53 +72,6 @@ class TestEvaluator(unittest.TestCase):
         evaluator.set_default_attributes({"some_attr": 5, "some_other_attr": 6})
         self.assertEqual(evaluator.evaluate("a", ""), True)
         self.assertEqual(evaluator.evaluate("b", ""), 3)
-
-    def test_multiple_config(self):
-        config1 = CompiledConfig.from_dict(
-            {
-                "flags": {
-                    "a": {
-                        "default": False,
-                    },
-                },
-            }
-        )
-        config2 = CompiledConfig.from_dict(
-            {
-                "flags": {
-                    "a": {
-                        "default": False,
-                    },
-                },
-                "rules": {
-                    "r0": {
-                        "filter": "attr:at2 = 6",
-                        "variants": {
-                            "a": True,
-                        },
-                    },
-                },
-            }
-        )
-        evaluator = Evaluator()
-        evaluator.load_config(config1)
-        self.assertEqual(evaluator.evaluate("a", "", {"at2": 6}), False)
-        evaluator.load_config(config2)
-        self.assertEqual(evaluator.evaluate("a", "", {"at2": 6}), True)
-
-        evaluator = Evaluator()
-        evaluator.load_config(config1, 1000)
-        evaluator.load_config(config2, 1200)
-        with self.assertRaisesRegex(ValueError, "No active config available"):
-            self.assertEqual(evaluator.evaluate("a", "", {"__now": 500, "at2": 6}), False)
-        self.assertEqual(evaluator.evaluate("a", "", {"__now": 1000, "at2": 6}), False)
-        self.assertEqual(evaluator.evaluate("a", "", {"__now": 1100, "at2": 6}), False)
-        self.assertEqual(evaluator.evaluate("a", "", {"__now": 1300, "at2": 6}), True)
-
-        evaluator.load_config(config2, 1200)  # Repeat load the same config
-        evaluator.load_config(config1, 1000)
-        self.assertEqual(evaluator.evaluate("a", "", {"__now": 1300, "at2": 6}), True)
-        self.assertEqual(evaluator.evaluate("a", "", {"__now": 1100, "at2": 6}), False)
 
     def test_periodic_exporter(self):
         evals: list[FlagEvaluation] = []

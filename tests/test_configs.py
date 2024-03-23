@@ -252,6 +252,12 @@ class TestValidConfig(unittest.TestCase):
         self.assertEqual(self._valid_config.flags["a"].default, True)
         self.assertEqual(self._valid_config.flags["a"].variants, {True, False})
 
+    def test_config_serialization(self):
+        b = self._valid_config.to_bytes()
+        cc = CompiledConfig.from_bytes(b)
+        self.assertSetEqual(set(self._valid_config.flags), set(cc.flags))
+        self.assertEqual(self._valid_config.flags["a"].eval("", {}).variant, cc.flags["a"].eval("", {}).variant)
+
     def test_valid_const_config(self):
         cases = [
             # flag, attrs, reason, rule, variant
