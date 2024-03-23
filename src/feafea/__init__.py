@@ -1,8 +1,8 @@
 from __future__ import annotations
-import glob
 import re
 import logging
 import datetime
+import dill
 import os
 import time
 import json
@@ -629,6 +629,15 @@ class CompiledConfig:
     flags: dict[str, CompiledFlag]
 
     @staticmethod
+    def from_bytes(b: bytes) -> CompiledConfig:
+        obj = dill.loads(b)
+        assert isinstance(obj, CompiledConfig)
+        return obj
+
+    def to_bytes(self) -> bytes:
+        return dill.dumps(self)
+
+    @staticmethod
     def from_dict(c: DictConfig) -> CompiledConfig:
         """
         Compile the config into a format that can be loaded into the evaluator.
@@ -934,10 +943,10 @@ class Evaluator:
         export_block_seconds: int = 60 * 5,
         keep_last_n_configs: int = 10,
     ):
-        self._config_mu = threading.RLock()
-        self._configs: list[tuple[CompiledConfig, float]] = []
         self._default_attributes_mu = threading.RLock()
         self._default_attributes: Attributes = {}
+        self._config_mu = threading.RLock()
+        self._config: CompiledConfig | None = None
         self._keep_last_n_configs = keep_last_n_configs
 
         if exporter:
@@ -972,24 +981,10 @@ class Evaluator:
     def stop_exporter(self):
         self._stop_wait.set()
 
-    def load_config(self, config: CompiledConfig, enable_after: float | None = None):
-        """
-        Load the config into the evaluator. load_config is thread-safe. If None is
-        provided for enable_after, the config will be enabled immediately and all
-        previously loaded configs will be removed.
-
-        config: The compiled config to load.
-        enable_after: The unix seconds to enable the config after.
-        """
-        with self._config_mu:
-            if enable_after is None:
-                self._configs = [(config, 0)]
-            else:
-                if (config, enable_after) in self._configs:
-                    return
-                self._configs += [(config, enable_after)]
-                self._configs.sort(key=lambda x: x[1])
-                self._configs = self._configs[-self._keep_last_n_configs :]
+    def _get_default_attributes(self):
+        with self._default_attributes_mu:
+            attrs = self._default_attributes
+        return attrs
 
     def set_default_attributes(self, attributes: Attributes = {}):
         """
@@ -1003,13 +998,12 @@ class Evaluator:
         with self._default_attributes_mu:
             self._default_attributes = attributes
 
-    def _get_active_config(self, t: float) -> tuple[CompiledConfig, float]:
+    def load_config(self, config: CompiledConfig):
+        """
+        Load the compiled config into the evaluator. load_config is thread-safe.
+        """
         with self._config_mu:
-            configs = self._configs
-        for config, enable_after in reversed(configs):
-            if enable_after <= t:
-                return config, enable_after
-        raise ValueError("No active config available")
+            self._config = config
 
     def _export_block_id(self, t: float) -> int:
         return (int(t) // self._export_block_seconds) * self._export_block_seconds
@@ -1031,12 +1025,14 @@ class Evaluator:
         Evaluate all flags for the given id and attributes and return
         FlagEvaluations. detailed_evaluate_all is thread-safe.
         """
-        with self._default_attributes_mu:
-            default_attributes = self._default_attributes
+        default_attributes = self._get_default_attributes()
         merged_attributes = {"__now": time.time(), **default_attributes, **attributes}
         now = merged_attributes["__now"]
 
-        config, _ = self._get_active_config(now)
+        with self._config_mu:
+            config = self._config
+        if config is None:
+            raise RuntimeError("config not loaded")
 
         # Evaluate flags
 
@@ -1079,126 +1075,3 @@ class Evaluator:
         thread-safe.
         """
         return {n: e.variant for n, e in self.detailed_evaluate_all(names, id, attributes).items()}
-
-
-class ConfigRetrieval:
-    """
-    The result of retrieving the config from the source.
-    """
-
-    __slots__ = ("compiled_config", "last_modified_time", "etag")
-    compiled_config: CompiledConfig
-    last_modified_time: float | None
-    etag: Any
-
-    def __init__(self, compiled_config: CompiledConfig, last_modified_time: float | None = None, etag: Any = None):
-        self.compiled_config = compiled_config
-        self.last_modified_time = last_modified_time
-        self.etag = etag
-
-
-class ConfigRetriever:
-    @abstractmethod
-    def retrieve(self, last_modified_before: float | None = None, etag: Any = None) -> ConfigRetrieval | None:
-        """
-        Retrieve the config from the source. If etag is provided, the retriever should
-        return the config if the etag has changed. If the etag has not changed, the
-        retriever should return None. Retrieve is only allowed to return None if etag
-        is provided. If etag is not provided, the retriever must always return the
-        config.
-
-        If last_modified_before is None, the retriever should return the latest
-        config.
-        If last_modified_before is provided, the retriever should return the
-        latest config with modified time of the config less than
-        last_modified_before.
-        To implement last_modified_before, the retriever must be able to store
-        multiple versions of the config.
-        """
-        ...
-
-
-class FileConfigRetriever(ConfigRetriever):
-    """
-    A retriever that retrieves the config from a file. It uses the filesystem
-    modification time to check if the config has changed.
-    """
-
-    def __init__(
-        self,
-        glob: str,
-        decode=lambda x: CompiledConfig.from_dict(json.loads(x)),
-    ):
-        self._glob = glob
-        self._decode = decode
-
-    def retrieve(self, last_modified_before: float | None = None, etag: Any = None) -> ConfigRetrieval | None:
-        files = [f for f in glob.glob(self._glob)]
-        files.sort(key=lambda f: os.path.getmtime(f), reverse=True)
-        if last_modified_before is None:
-            path = files[0]
-        else:
-            path = next(f for f in files if os.path.getmtime(f) < last_modified_before)
-
-        mtime = os.path.getmtime(path)
-        if etag is not None and mtime <= etag:
-            return None
-        with open(path, "rb") as f:
-            return ConfigRetrieval(compiled_config=self._decode(f.read()), last_modified_time=mtime, etag=mtime)
-
-
-class AutoLoader:
-    """
-    The autoloader is responsible for periodically loading the config from the retriever
-    into the evaluator. It also makes its best attempt at scheduling the enablement of
-    the config such that other similar loaders in other processes will enable the config
-    at almost the same time. This is useful for ensuring that the config is enabled
-    across all processes at the same time.
-    """
-
-    def __init__(
-        self,
-        e: Evaluator,
-        r: ConfigRetriever,
-        min_time_between_config_updates: float = 10.0,
-    ):
-        """
-        Starts the autoloader in a separate background thread.
-        """
-
-        # Load the latest config immediately (and die in sync if it fails.)
-
-        cr = r.retrieve(last_modified_before=time.time())
-        if cr is None:
-            raise ValueError("Retriever must not return None when no etag is provided")
-        e.load_config(cr.compiled_config)
-        self._etag = cr.etag
-        self._stop = threading.Event()
-
-        # Setup the background thread to periodically load the config.
-
-        def _load():
-            while not self._stop.is_set():
-                self._stop.wait(min_time_between_config_updates / 2)
-                try:
-                    cr = r.retrieve(etag=self._etag)
-                except Exception:
-                    logger.exception("Error retrieving config")
-                    continue
-                if cr is None:
-                    continue
-                self._etag = cr.etag
-                enable_after = cr.last_modified_time + (min_time_between_config_updates) if cr.last_modified_time is not None else None
-                try:
-                    e.load_config(cr.compiled_config, enable_after)
-                except Exception:
-                    logger.exception("Error loading config")
-
-        threading.Thread(target=_load, daemon=True).start()
-
-    def stop(self):
-        """
-        Stop the autoloader. The autoloader cannot be used after this method is
-        called.
-        """
-        self._stop.set()
