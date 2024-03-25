@@ -15,7 +15,7 @@ from typing import Any, Iterable, Literal
 from copy import deepcopy
 from hashlib import md5
 
-from prometheus_client import Counter, Histogram
+from prometheus_client import Histogram
 
 
 logger = logging.getLogger(__name__)
@@ -917,11 +917,6 @@ class Exporter:
 
 
 _prom_labels = ["flag", "variant", "default", "rule", "reason", "split"]
-_prom_eval_counter = Counter(
-    name="feafea_evaluations",
-    documentation="Number of flag evaluations",
-    labelnames=_prom_labels,
-)
 _prom_eval_duration = Histogram(
     "feafea_evaluation_seconds",
     "Flag evaluation duration in seconds",
@@ -1017,7 +1012,6 @@ class Evaluator:
             "reason": e.reason,
             "split": e.split,
         }
-        _prom_eval_counter.labels(**labels).inc()
         _prom_eval_duration.labels(**labels).observe(dur)
 
     def detailed_evaluate_all(self, names: Iterable[str], id: str, attributes: Attributes = {}) -> dict[str, FlagEvaluation]:
