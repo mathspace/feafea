@@ -36,12 +36,12 @@ class TestAttributeOnlyFilters(unittest.TestCase):
             ("attr:sid in ['apple']", {"sid": "orang"}, False),
             ("attr:sid not in [5,6]", {"sid": 4}, True),
             ("attr:sid not in [5,6]", {"sid": 6}, False),
-            ("2 in attr:sid", {"sid": [1, 2]}, True),
-            ("2 in attr:sid", {"sid": [1, 4]}, False),
-            ("2 not in attr:sid", {"sid": [1, 4]}, True),
-            ("2 not in attr:sid", {"sid": [1, 2]}, False),
-            ("'apple' in attr:sid", {"sid": ["apple", "orange"]}, True),
-            ("'apple' in attr:sid", {"sid": ["walnut", "coconut"]}, False),
+            ("2 in attr:sid", {"sid": {1, 2}}, True),
+            ("2 in attr:sid", {"sid": {1, 4}}, False),
+            ("2 not in attr:sid", {"sid": {1, 4}}, True),
+            ("2 not in attr:sid", {"sid": {1, 2}}, False),
+            ("'apple' in attr:sid", {"sid": {"apple", "orange"}}, True),
+            ("'apple' in attr:sid", {"sid": {"walnut", "coconut"}}, False),
             # Multiple terms
             ("attr:sid = 1 and attr:age = 2", {"sid": 1, "age": 2}, True),
             ("attr:sid = 1 and attr:age = 2", {"sid": 1, "age": 3}, False),
@@ -64,6 +64,9 @@ class TestAttributeOnlyFilters(unittest.TestCase):
             ("attr:a and attr:b or attr:c", {"a": False, "b": True, "c": True}, True),
             ("not attr:a = 2", {"a": 2}, False),
             ("not attr:a = 2", {"a": 3}, True),
+            # None
+            ("attr:a = 2", {"a": None}, False),
+            ("attr:a = 2 or attr:b = 3", {"a": None, "b": 3}, False),
         ]
 
         for filter, attr, expected in cases:
@@ -124,16 +127,23 @@ class TestAttributeOnlyFilters(unittest.TestCase):
         cases = [
             ("8 in attr:a", {"a": "not_a_set"}),
             ("attr:a > 8", {"a": set([1, 2, 3])}),
+            ("attr:a > 8", {"a": "not_a_number"}),
+            ("attr:a > 'not_a_str'", {"a": 8}),
+            ("1 in attr:a", {"a": [1, 2, 3]}),  # not a set
+            ("'1' in attr:a", {"a": ["1"]}),  # not a set
         ]
         for filter, attrs in cases:
             with self.subTest(filter):
+                # Invalid attribute usage causes that particular clause to evaluate to False.
                 fs = _FilterSet()
-                # Invalid attribute usage causes an exception. By adding an "OR
-                # true" we ensure that a false evaluation is due to the invalid
-                # attribute and not the filter itself.
-                fs.parse("f", f"({filter}) or attr:true")
+                fs.parse("f", f"({filter}) and attr:true")
                 cf = fs.compile("f", {}, {})
                 self.assertFalse(cf.eval("", {**attrs, "true": True}))
+
+                fs = _FilterSet()
+                fs.parse("f", f"({filter}) or attr:true")
+                cf = fs.compile("f", {}, {})
+                self.assertTrue(cf.eval("", {**attrs, "true": True}))
 
     def test_invalid_symbol_names(self):
         cases = [

@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 
 type Variant = str | bool | int
 type AttributeSet = set[str] | set[int]
-type AttributeValue = str | bool | int | float | AttributeSet
+type AttributeValue = None | str | bool | int | float | AttributeSet
 type Attributes = dict[str, AttributeValue]
 type DictConfig = dict[str, Any]
 
@@ -449,21 +449,52 @@ class _FilterSet:
     def _pythonize(self, f: _ParsedFilter) -> str:
         """
         Convert the parse tree into a python expression.
+
+        Enough type checks are done on attribute during runtime to ensure that
+        the python expression never raises an exception.
         """
         op, arg1, arg2 = f
         match op:
             case "AND" | "OR":
+                # We know for certain that lhs and rhs are booleans. AND/ORing them
+                # together will always yield a boolean and will never raise an exception.
                 return f" {self._py_op_map[op]} ".join(f"({self._pythonize(a)})" for a in arg1)
             case "NOT":
+                # We know for certain that the argument is a boolean. Negating it
+                # will always yield a boolean and will never raise an exception.
                 return f"(not ({self._pythonize(arg1)}))"
             case "EQ" | "NE" | "LE" | "GE" | "GT" | "LT" | "IN" | "NOTIN":
                 sym_type, sym_name = arg1
                 match sym_type:
                     case "FLAG":
+                        # Further stages of compilation ensure that the referenced flag here
+                        # exists and has the same type as the inferred type from the filter.
+                        # This will therefore never raise an exception.
                         lhs = f"flags[{sym_name!r}].eval(target_id, attributes).variant"
+                        if op in {"IN", "NOTIN"}:
+                            return f"{lhs} {self._py_op_map[op]} sets[{arg2!r}]"
+                        else:
+                            return f"{lhs} {self._py_op_map[op]} {arg2!r}"
                     case "ATTR":
                         lhs = f"attributes[{sym_name!r}]"
+                        if op in {"IN", "NOTIN"}:
+                            # We check to ensure that the RHS is a str or int during runtime.
+                            # Since `str/int in/not in set()` will always yield a boolean, the
+                            # expression will never raise an exception.
+                            return f"(isinstance(attributes.get({sym_name!r}), (str, int)) and {lhs} {self._py_op_map[op]} sets[{arg2!r}])"
+                        else:
+                            # Not all types are comparable with each other. So we need to
+                            # ensure that the types are compatible before comparing them.
+                            if isinstance(arg2, str):
+                                compat_types = "str"
+                            elif isinstance(arg2, (int, float)):
+                                compat_types = "(int, float)"
+                            else:
+                                assert False, "unreachable"  # pragma: no cover
+                            return f"(isinstance(attributes.get({sym_name!r}), {compat_types}) and {lhs} {self._py_op_map[op]} {arg2!r})"
                     case "RULE":
+                        # Further stages of compilation ensure that the referenced rule here
+                        # exists. This will therefore never raise an exception.
                         rule_name, split_name = sym_name
                         if split_name is not None:
                             return f"rules[{rule_name!r}].eval(target_id, attributes)[0]"
@@ -471,12 +502,11 @@ class _FilterSet:
                             return f"rules[{rule_name!r}].eval(target_id, attributes) == (True, {split_name!r})"
                     case _:  # pragma: no cover
                         assert False, "unreachable"  # pragma: no cover
-                if op in {"IN", "NOTIN"}:
-                    return f"{lhs} {self._py_op_map[op]} sets[{arg2!r}]"
-                else:
-                    return f"{lhs} {self._py_op_map[op]} {arg2!r}"
             case "CONTAIN" | "NOTCONTAIN":
-                return f"{arg2!r} {self._py_op_map[op]} attributes[{arg1!r}]"
+                # We check to ensure that the RHS is a set during runtime.
+                # Since arg2 can only be an int or a str, `arg2 in/not in set()`
+                # will always yield a boolean and will never raise an exception.
+                return f"(isinstance(attributes.get({arg1!r}), set) and {arg2!r} {self._py_op_map[op]} attributes[{arg1!r}])"
             case _:  # pragma: no cover
                 assert False, "unreachable"  # pragma: no cover
 
@@ -493,10 +523,7 @@ class _FilterSet:
         py_expr = self._pythonize(optimized)
         code_str = f"""
 def a(target_id, attributes):
-    try:
-        return {py_expr}
-    except Exception as e:
-        return False
+    return {py_expr}
 """
         py_code = compile(code_str, "", "exec")
         _locals = {}
@@ -573,11 +600,7 @@ class CompiledFlag:
         e.target_id = target_id
         e.split = ""
         for rule in self._rules:
-            try:
-                v = rule.eval(target_id, attributes)
-            except Exception as ex:
-                logger.exception(f"Error evaluating rule {rule.rule_name}: {ex}")
-                continue
+            v = rule.eval(target_id, attributes)
             if v is not None:
                 e.rule = rule.rule_name
                 if isinstance(v, tuple):
@@ -786,11 +809,12 @@ class CompiledConfig:
 
             lines = ["def a(target_id, attributes):"]
             for line in py_common:
-                line = re.sub(r"return None$", "return (False, None)", line, flags=re.M)
-                line = re.sub(r"^#FIRULE ", "", line, flags=re.M)
+                line = re.sub(r"return None$", "return (False, None)", line)
+                line = re.sub(r"^#FIRULE ", "", line)
                 lines.append(f"  {line}")
             if "splits" not in r:
                 lines.append("  return (True, None)")
+            lines.append("  return (False, None)")
             code = compile("\n".join(lines), "", "exec")
             _locals = {}
             exec(code, globals, _locals)
@@ -981,6 +1005,22 @@ class Evaluator:
             attrs = self._default_attributes
         return attrs
 
+    @staticmethod
+    def _validate_attributes_type(attributes: Attributes):
+        if not isinstance(attributes, dict):
+            raise TypeError(f"attributes must be a dict, not {type(attributes).__name__}")
+        for k, v in attributes.items():
+            if not isinstance(k, str):
+                raise TypeError(f"attribute key must be a string, not {type(k).__name__}")
+            if not isinstance(v, (str, int, float, bool, set, type(None))):
+                raise TypeError(f"attribute value must be a string, int, float, bool, set, None, not {type(v).__name__}")
+            if isinstance(v, set) and len(v) > 0:
+                fel = next(iter(v))
+                if not isinstance(fel, (str, int)):
+                    raise TypeError(f"set values must be strings and ints not {type(v).__name__}")
+                if not all(isinstance(e, type(fel)) for e in v):
+                    raise TypeError("set values must be of the same type")
+
     def set_default_attributes(self, attributes: Attributes = {}):
         """
         Set the default attributes to use when evaluating flags.
@@ -989,6 +1029,7 @@ class Evaluator:
         such as environment, region, etc.
         set_default_attributes is thread-safe.
         """
+        self._validate_attributes_type(attributes)
         attributes = deepcopy(attributes)
         with self._default_attributes_mu:
             self._default_attributes = attributes
@@ -1019,6 +1060,9 @@ class Evaluator:
         Evaluate all flags for the given id and attributes and return
         FlagEvaluations. detailed_evaluate_all is thread-safe.
         """
+        self._validate_attributes_type(attributes)
+        if not isinstance(id, str):
+            raise TypeError(f"id must be a string, not {type(id).__name__}")
         default_attributes = self._get_default_attributes()
         merged_attributes = {"__now": time.time(), **default_attributes, **attributes}
         now = merged_attributes["__now"]

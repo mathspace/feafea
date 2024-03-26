@@ -1,5 +1,6 @@
 import threading
 import time
+from typing import cast
 import unittest
 
 from src.feafea import CompiledConfig, Evaluator, Exporter, FlagEvaluation, logger
@@ -36,7 +37,7 @@ class TestEvaluator(unittest.TestCase):
             }
         )
 
-    def test_local_evaluator_evaluation(self):
+    def test_invalid_evaluator_usage(self):
         evaluator = Evaluator()
 
         with self.assertRaisesRegex(RuntimeError, "config not loaded"):
@@ -46,6 +47,28 @@ class TestEvaluator(unittest.TestCase):
 
         with self.assertRaisesRegex(ValueError, "does not exist in the config"):
             evaluator.evaluate("z", "")
+
+        with self.assertRaisesRegex(TypeError, "must be a string"):
+            evaluator.evaluate("a", cast(str, 1))
+
+        invalid_attributes = [
+            "non_dict",
+            set([1, 2]),
+            [],
+            {99: 11},  # non str key
+            {"b": (1, 2, 3)},  # tuple value
+            {"c": {"a": 1}},  # dict value
+            {"d": {(1, 2), (3, 4)}},  # set of tuples
+            {"e": {None, 1}},  # invalid set element
+            {"e": {2, "3"}},  # different set element types
+        ]
+        for attr in invalid_attributes:
+            with self.assertRaises(TypeError):
+                evaluator.evaluate("a", "", attr)
+
+    def test_local_evaluator_evaluation(self):
+        evaluator = Evaluator()
+        evaluator.load_config(self._valid_config)
 
         evs = evaluator.detailed_evaluate_all(["a", "b"], "")
         a = evs["a"]
