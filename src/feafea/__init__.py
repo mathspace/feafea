@@ -11,7 +11,7 @@ import threading
 from abc import abstractmethod
 from collections.abc import Callable
 from collections import defaultdict
-from typing import Any, Iterable, Literal
+from typing import Any, Iterable, Literal, Mapping, Set
 from copy import deepcopy
 from hashlib import md5
 
@@ -21,10 +21,10 @@ from prometheus_client import Histogram
 logger = logging.getLogger(__name__)
 
 type Variant = str | bool | int
-type AttributeSet = set[str] | set[int]
+type AttributeSet = Set[str] | Set[int]
 type AttributeValue = None | str | bool | int | float | AttributeSet
-type Attributes = dict[str, AttributeValue]
-type DictConfig = dict[str, Any]
+type Attributes = Mapping[str, AttributeValue]
+type DictConfig = Mapping[str, Any]
 
 
 def _hash_percent(s: str, seed: str = "") -> float:

@@ -66,7 +66,8 @@ class TestAttributeOnlyFilters(unittest.TestCase):
             ("not attr:a = 2", {"a": 3}, True),
             # None
             ("attr:a = 2", {"a": None}, False),
-            ("attr:a = 2 or attr:b = 3", {"a": None, "b": 3}, False),
+            ("attr:a = 2 or attr:b = 3", {"a": None, "b": 3}, True),
+            ("attr:a = 2 or attr:b = 3", {"b": 3}, True),
         ]
 
         for filter, attr, expected in cases:
