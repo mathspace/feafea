@@ -149,7 +149,7 @@ Here is a rule with the filter defined directly:
     "enable_feature_X_for_beta_users": {
       "filter": "attr:user_type = 'beta'",
       "variants": {
-        "enable_feature_X": True
+        "enable_feature_X": true
       }
     }
 }
@@ -166,7 +166,7 @@ Here is a the same rule referencing a named filter:
     "enable_feature_X_for_beta_users": {
       "filter": "filter:beta_users",
       "variants": {
-        "enable_feature_X": True
+        "enable_feature_X": true
       }
     }
 }
