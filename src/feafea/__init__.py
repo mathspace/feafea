@@ -11,7 +11,7 @@ import threading
 from abc import abstractmethod
 from collections.abc import Callable
 from collections import defaultdict
-from typing import Any, Iterable, Literal, Mapping, Set
+from typing import Any, Iterable, Literal, Mapping, Set, cast
 from copy import deepcopy
 from hashlib import md5
 
@@ -32,16 +32,16 @@ def _hash_percent(s: str, seed: str = "") -> float:
     Hashes the given string and seed to a float in the range [0, 100).
 
     This is not the most efficient hash function but it's stable.
-    Stability of this hash function is crucial. It's used to hash feature flag
+    Stability of this hash function is CRUCIAL. It's used to hash feature flag
     names and target IDs to ensure consistent evaluation of feature flags across
-    different instances, different python versions and so on because the distribution
-    of target IDs depend on it.
+    time, different instances, different python versions, operating systems and
+    so on because the distribution of target IDs depend on it.
     """
     return (
         int.from_bytes(
             md5(f"{seed}:{s}".encode("utf-8")).digest(),
-            byteorder="big",  # Being explicit to survive default changes.
-            signed=False,  # Being explicit to survive default changes.
+            byteorder="big",  # Being explicit to survive future default changes.
+            signed=False,  # Being explicit to survive future default changes.
         )
         / (1 << 128)  # md5 hash is 128 bits long.
         * 100
@@ -73,6 +73,8 @@ type _ParsedFilter = tuple[str, Any, Any]
 _filter_token_re = re.compile(
     "|".join(
         f"(?P<{name}>{pattern})"
+        # The order of the patterns is important. Generally, we want to match
+        # the longest possible token first.
         for name, pattern in [
             # Literals
             ("STR", r'"[^"]*"|\'[^\']*\''),
@@ -929,17 +931,6 @@ class FlagEvaluation:
     timestamp: float
 
 
-class Exporter:
-    """
-    The exporter is responsible for exporting the flag evaluations to a storage
-    system. This is useful for auditing, debugging, and for other systems to consume
-    the flag evaluations.
-    """
-
-    @abstractmethod
-    def export(self, entries: list[FlagEvaluation]) -> None: ...
-
-
 _prom_labels = ["flag", "variant", "default", "rule", "reason", "split"]
 _prom_eval_duration = Histogram(
     "feafea_evaluation_duration_seconds",
@@ -951,54 +942,29 @@ _prom_eval_duration = Histogram(
 
 class Evaluator:
     """
-    The evaluator is responsible for evaluating feature flags and rules. It also
-    provides a way to export flag evaluations to a storage system. The evaluator
-    is thread-safe.
+    The evaluator is responsible for evaluating feature flags and rules. The
+    evaluator is thread-safe.
+
+    If record_evaluations is set to True, the evaluator will record all flag
+    evaluations and stores them in memory. A call to pop_evaluations will
+    return all recorded evaluations and clear the recorded evaluations.
+
+    NOTE: There is no limit to how many evaluations are stored in memory. It's
+    the responsibility of the caller to ensure that the memory usage is within
+    acceptable limits and call pop_evaluations frequently to clear the recorded
+    evaluations.
     """
 
-    def __init__(
-        self,
-        exporter: Exporter | None = None,
-        export_block_seconds: int = 60 * 5,
-        keep_last_n_configs: int = 10,
-    ):
+    def __init__(self, record_evaluations: bool = False):
         self._default_attributes_mu = threading.RLock()
         self._default_attributes: Attributes = {}
         self._config_mu = threading.RLock()
         self._config: CompiledConfig | None = None
-        self._keep_last_n_configs = keep_last_n_configs
 
-        if exporter:
-            self._exporter = exporter
-            self._export_block_seconds = export_block_seconds
+        self._record_evaluations = record_evaluations
+        if record_evaluations:
             self._evaluations_mu = threading.Lock()
-            self._evaluations: dict[int, dict[tuple[int, str, str], FlagEvaluation]] = defaultdict(dict)
-            self._stop_wait = threading.Event()
-            self._start_exporter()
-
-    def _start_exporter(self):
-        def _worker():
-            while not self._stop_wait.is_set():
-                self._stop_wait.wait(self._export_block_seconds)
-                cur_block_id = self._export_block_id(time.time())
-                evaluations = []
-                with self._evaluations_mu:
-                    for block_id, block in list(self._evaluations.items()):
-                        if block_id < cur_block_id:
-                            evaluations.append(block)
-                            del self._evaluations[block_id]
-                if not evaluations:
-                    continue
-                entries = [e for d in evaluations for e in d.values()]
-                try:
-                    self._exporter.export(entries)
-                except Exception:
-                    logger.exception("Error exporting evaluations")
-
-        threading.Thread(target=_worker, daemon=True).start()
-
-    def stop_exporter(self):
-        self._stop_wait.set()
+            self._evaluations: list[FlagEvaluation] = []
 
     def _get_default_attributes(self):
         with self._default_attributes_mu:
@@ -1041,9 +1007,6 @@ class Evaluator:
         with self._config_mu:
             self._config = config
 
-    def _export_block_id(self, t: float) -> int:
-        return (int(t) // self._export_block_seconds) * self._export_block_seconds
-
     def _record_eval_metrics(self, e: FlagEvaluation, dur: float):
         labels = {
             "flag": e.flag,
@@ -1081,21 +1044,30 @@ class Evaluator:
                 raise ValueError(f"Flag {name} does not exist in the config")
             start = time.perf_counter()
             e = flag.eval(id, merged_attributes)
+            e.timestamp = now
             dur = time.perf_counter() - start
             self._record_eval_metrics(e, dur)
             fe[name] = e
 
-        # Export evaluations
+        # Record evaluations
 
-        if hasattr(self, "_exporter"):
-            block_id = self._export_block_id(now)
-            for e in fe.values():
-                e.timestamp = block_id
-            upd = {(block_id, id, name): e for name, e in fe.items()}
+        if self._record_evaluations:
             with self._evaluations_mu:
-                self._evaluations[block_id].update(upd)
+                self._evaluations.extend(fe.values())
 
         return fe
+
+    def pop_evaluations(self) -> list[FlagEvaluation]:
+        """
+        Pop all recorded evaluations since the last call and return them.
+        pop_evaluations is thread-safe.
+        """
+        if not self._record_evaluations:
+            return []
+        with self._evaluations_mu:
+            es = self._evaluations
+            self._evaluations = []
+            return es
 
     def evaluate(self, name: str, id: str, attributes: Attributes = {}) -> Variant:
         """

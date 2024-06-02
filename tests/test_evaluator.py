@@ -1,9 +1,7 @@
-import threading
-import time
 from typing import cast
 import unittest
 
-from src.feafea import CompiledConfig, Evaluator, Exporter, FlagEvaluation, logger
+from src.feafea import CompiledConfig, Evaluator
 
 
 class TestEvaluator(unittest.TestCase):
@@ -96,45 +94,20 @@ class TestEvaluator(unittest.TestCase):
         self.assertEqual(evaluator.evaluate("a", ""), True)
         self.assertEqual(evaluator.evaluate("b", ""), 3)
 
-    def test_periodic_exporter(self):
-        evals: list[FlagEvaluation] = []
-
-        event = threading.Event()
-
-        class PeriodicExporter(Exporter):
-            def __init__(self):
-                self.exported = []
-
-            def export(self, entries: list[FlagEvaluation]) -> None:
-                event.set()
-                if any(e.timestamp == 8000 for e in entries):
-                    raise Exception("A101")
-                evals.extend(entries)
-
-        evaluator = Evaluator(exporter=PeriodicExporter(), export_block_seconds=2)
+    def test_record_evaluations(self):
+        evaluator = Evaluator(record_evaluations=True)
         evaluator.load_config(self._valid_config)
 
-        with self.assertLogs(logger, level="ERROR") as cm:
-            evaluator.evaluate("a", "10", {"__now": 8000})  # Needed so export is called.
-            # Wait until an export event occurs so we know with confidence that the exporter is
-            # not going to export in the middle of us doing evaluations.
-            # We also get a chance to check if the exporter thread is working.
-            self.assertTrue(event.wait(2.5))
+        evaluator.evaluate("a", "10", {"__now": 1000})
+        evaluator.evaluate("a", "12", {"__now": 1001})
+        evaluator.evaluate("a", "12", {"__now": 1002})
+        evaluator.evaluate("b", "18", {"__now": 1003})
+        evaluator.evaluate("a", "10", {"__now": 1004})
+        evaluator.evaluate("a", "18", {"__now": 1005})
+        evaluator.evaluate("a", "19", {"__now": 1006})
+        evaluator.evaluate("b", "88", {"__now": 1007, "some_other_attr": 6})
 
-            evaluator.evaluate("a", "10", {"__now": 1000})
-            evaluator.evaluate("a", "12", {"__now": 1001})
-            evaluator.evaluate("a", "12", {"__now": 1001})
-            evaluator.evaluate("b", "18", {"__now": 1001})
-            evaluator.evaluate("a", "10", {"__now": 1002})
-            evaluator.evaluate("a", "18", {"__now": 1002})
-            evaluator.evaluate("a", "19", {"__now": 1002})
-            evaluator.evaluate("b", "88", {"__now": 1003, "some_other_attr": 6})
-
-            time.sleep(2.5)
-
-        self.assertRegex(cm.output[0], "A101")
-
-        evaluator.stop_exporter()
+        evals = evaluator.pop_evaluations()
 
         evals.sort(key=lambda x: (x.timestamp, x.flag, x.target_id))
         eval_tuples = [(e.timestamp, e.flag, e.target_id, e.reason, e.variant) for e in evals]
@@ -142,11 +115,15 @@ class TestEvaluator(unittest.TestCase):
             eval_tuples,
             [
                 (1000, "a", "10", "default", False),
-                (1000, "a", "12", "default", False),
-                (1000, "b", "18", "default", 1),
-                (1002, "a", "10", "default", False),
-                (1002, "a", "18", "default", False),
-                (1002, "a", "19", "default", False),
-                (1002, "b", "88", "const_rule", 3),
+                (1001, "a", "12", "default", False),
+                (1002, "a", "12", "default", False),
+                (1003, "b", "18", "default", 1),
+                (1004, "a", "10", "default", False),
+                (1005, "a", "18", "default", False),
+                (1006, "a", "19", "default", False),
+                (1007, "b", "88", "const_rule", 3),
             ],
         )
+
+        evals = evaluator.pop_evaluations()
+        self.assertListEqual(evals, [])
