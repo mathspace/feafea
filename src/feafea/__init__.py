@@ -983,7 +983,7 @@ class Evaluator:
             if isinstance(v, set) and len(v) > 0:
                 fel = next(iter(v))
                 if not isinstance(fel, (str, int)):
-                    raise TypeError(f"set values must be strings and ints not {type(v).__name__}")
+                    raise TypeError(f"set values must be strings and ints not {type(fel).__name__}")
                 if not all(isinstance(e, type(fel)) for e in v):
                     raise TypeError("set values must be of the same type")
 
