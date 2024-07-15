@@ -8,10 +8,9 @@ import time
 import json
 import jsonschema
 import threading
-from abc import abstractmethod
 from collections.abc import Callable
 from collections import defaultdict
-from typing import Any, Iterable, Literal, Mapping, Set, cast
+from typing import Any, Iterable, Literal, Mapping, Set
 from copy import deepcopy
 from hashlib import md5
 
@@ -77,6 +76,7 @@ _filter_token_re = re.compile(
         # the longest possible token first.
         for name, pattern in [
             # Literals
+            ("BOOL", r"true\b|false\b"),
             ("STR", r'"[^"]*"|\'[^\']*\''),
             ("FLOAT", r"-?\d+\.\d+"),
             ("INT", r"-?\d+"),
@@ -157,6 +157,8 @@ def _parse_filter(f: str) -> _ParsedFilter:
             case _:
                 value = match.group()
                 match kind:
+                    case "BOOL":
+                        value = value == "true"
                     case "STR":
                         value = value[1:-1]
                     case "FLOAT":
@@ -250,16 +252,14 @@ def _parse_filter(f: str) -> _ParsedFilter:
 
         if tokens[0][0] in ("LT", "LE", "GT", "GE", "EQ", "NE"):
             op = tokens.pop(0)[0]
-            if tokens[0][0] not in {"INT", "STR", "FLOAT"}:
-                raise ValueError(f"expected number after '{op}' not '{tokens[0][1]}'")
+            if tokens[0][0] == "BOOL":
+                if op not in {"EQ", "NE"}:
+                    raise ValueError(f"expected EQ/NE after '{op}' not BOOL")
+            elif tokens[0][0] not in {"INT", "STR", "FLOAT"}:
+                raise ValueError(f"expected INT/STR/FLOAT after '{op}' not '{tokens[0][1]}'")
             t, value = tokens.pop(0)
-            if sym_type == "FLAG" and t not in {"STR", "INT"}:
-                # Flag variants can also be boolean but we don't have true/false
-                # as literals in the rule language so we don't support comparing
-                # feature flags to boolean values. Instead, simply using the
-                # feature flag as the left operand will evaluate to a boolean
-                # and that's covered by the last case in this function.
-                raise ValueError("expected STR/INT for feature flag comparison")
+            if sym_type == "FLAG" and t not in {"BOOL", "STR", "INT"}:
+                raise ValueError("expected BOOL/STR/INT for feature flag comparison")
             return (op, (sym_type, sym_name), value)
 
         elif tokens[0][0] in {"IN", "NOTIN"}:

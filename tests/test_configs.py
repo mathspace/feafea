@@ -140,7 +140,7 @@ class TestValidConfig(unittest.TestCase):
                 "filters": {
                     "f1": "attr:at1 in [5,6,7]",
                     "f2": "flag:b = 1",
-                    "f3": "filter:f1 and filter:f2",
+                    "f3": "filter:f1 and filter:f2 = true",
                     "f4": "rule:r1",
                 },
                 "rules": {

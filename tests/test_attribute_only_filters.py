@@ -16,6 +16,10 @@ class TestAttributeOnlyFilters(unittest.TestCase):
             ("attr:sid = 4.5", {"sid": 4.6}, False),
             ("attr:sid", {"sid": True}, True),
             ("attr:sid", {"sid": False}, False),
+            ("attr:sid = true", {"sid": True}, True),
+            ("attr:sid = false", {"sid": False}, True),
+            ("attr:sid != true", {"sid": True}, False),
+            ("attr:sid != false", {"sid": False}, False),
             ("attr:sid > 8", {"sid": 9}, True),
             ("attr:sid < -8", {"sid": -9}, True),
             ("attr:sid < -8", {"sid": 88}, False),
@@ -64,10 +68,14 @@ class TestAttributeOnlyFilters(unittest.TestCase):
             ("attr:a and attr:b or attr:c", {"a": False, "b": True, "c": True}, True),
             ("not attr:a = 2", {"a": 2}, False),
             ("not attr:a = 2", {"a": 3}, True),
+            ("not attr:a = true", {"a": True}, False),
+            ("not attr:a = false", {"a": True}, True),
             # None
             ("attr:a = 2", {"a": None}, False),
             ("attr:a = 2 or attr:b = 3", {"a": None, "b": 3}, True),
             ("attr:a = 2 or attr:b = 3", {"b": 3}, True),
+            ("attr:a", {}, False),
+            ("not attr:a", {}, True),
         ]
 
         for filter, attr, expected in cases:
@@ -106,16 +114,22 @@ class TestAttributeOnlyFilters(unittest.TestCase):
     def test_invalid_syntax(self):
         cases = [
             ("(attr:unbalanced_paren = 1", ValueError, r"expected '\)'"),
-            ("attr:a == 3", ValueError, "expected number after 'EQ' not '='"),
+            ("attr:a == 3", ValueError, "expected INT/STR/FLOAT after 'EQ' not '='"),
             ("8 = attr:lhs_literal_without_set", ValueError, "expected in/not in"),
             ("8 in flag:non_attr_rhs_for_lhs_literal", ValueError, r"expected attr:\*"),
             ("@", ValueError, "unexpected character '@'"),  # invalid token
             ("3.2", ValueError, r"expected attr:\*/flag:\*"),  # float on LHS
-            ("flag:flag_comp_with_float = 3.3", ValueError, "expected STR/INT for feature flag comparison"),
+            ("flag:flag_comp_with_float = 3.3", ValueError, "expected BOOL/STR/INT for feature flag comparison"),
             ("attr:rhs_non_set in 3", ValueError, "expected a set"),
-            ("attr:v > flag:rhs_flag_in_comp", ValueError, "expected number after 'GT'"),
+            ("attr:v > flag:rhs_flag_in_comp", ValueError, "expected INT/STR/FLOAT after 'GT'"),
             ("attr:v > 3.3 88", ValueError, "unexpected token '88'"),  # dangling literal
-            ("flag:d >= 3.3", ValueError, "expected STR/INT for feature flag comparison"),
+            ("flag:d >= 3.3", ValueError, "expected BOOL/STR/INT for feature flag comparison"),
+            ("attr:a > true", ValueError, "expected EQ/NE after"),
+            ("attr:a < true", ValueError, "expected EQ/NE after"),
+            ("attr:a >= true", ValueError, "expected EQ/NE after"),
+            ("attr:a <= false", ValueError, "expected EQ/NE after"),
+            ("truefalse", ValueError, r"unexpected character 't' at position 0"),  # combined bool literals
+            ("falset", ValueError, r"unexpected character 'f' at position 0"),
         ]
         for filter, err, regex in cases:
             with self.subTest(filter):
