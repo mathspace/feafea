@@ -40,6 +40,8 @@ class TestAttributeOnlyFilters(unittest.TestCase):
             ("attr:sid in ['apple']", {"sid": "orang"}, False),
             ("attr:sid not in [5,6]", {"sid": 4}, True),
             ("attr:sid not in [5,6]", {"sid": 6}, False),
+            ("attr:sid intersects [5,6]", {"sid": {6, 7}}, True),
+            ("attr:sid intersect [5,6]", {"sid": {7, 8}}, False),
             ("2 in attr:sid", {"sid": {1, 2}}, True),
             ("2 in attr:sid", {"sid": {1, 4}}, False),
             ("2 not in attr:sid", {"sid": {1, 4}}, True),
@@ -117,6 +119,8 @@ class TestAttributeOnlyFilters(unittest.TestCase):
             ("attr:a == 3", ValueError, "expected INT/STR/FLOAT after 'EQ' not '='"),
             ("8 = attr:lhs_literal_without_set", ValueError, "expected in/not in"),
             ("8 in flag:non_attr_rhs_for_lhs_literal", ValueError, r"expected attr:\*"),
+            ("flag:non_attr_rhs_for_lhs_literal intersects [5,6]", ValueError, r"expected attr:\* on left-hand-side of INTERSECTS"),
+            ("attr:a intersect 5", ValueError, r"expected set on right-hand-side of INTERSECTS"),
             ("@", ValueError, "unexpected character '@'"),  # invalid token
             ("3.2", ValueError, r"expected attr:\*/flag:\*"),  # float on LHS
             ("flag:flag_comp_with_float = 3.3", ValueError, "expected BOOL/STR/INT for feature flag comparison"),
@@ -141,6 +145,7 @@ class TestAttributeOnlyFilters(unittest.TestCase):
     def test_invalid_attributes(self):
         cases = [
             ("8 in attr:a", {"a": "not_a_set"}),
+            ("attr:a intersects [5,6]", {"a": 5}),  # a must be a set
             ("attr:a > 8", {"a": set([1, 2, 3])}),
             ("attr:a > 8", {"a": "not_a_number"}),
             ("attr:a > 'not_a_str'", {"a": 8}),

@@ -90,7 +90,7 @@ _filter_token_re = re.compile(
             # Set membership
             ("IN", r"in\b"),
             ("NOTIN", r"not\s+in\b"),
-            # Attribute as a set
+            ("INTERSECTS", r"intersects?\b"),
             ("CONTAINS", r"contains?\b"),
             ("NOTCONTAIN", r"not\s+contain\b"),
             # Boolean
@@ -273,6 +273,15 @@ def _parse_filter(f: str) -> _ParsedFilter:
                 raise ValueError("set values must all be of the same type")
             return (op, (sym_type, sym_name), values)
 
+        elif tokens[0][0] == "INTERSECTS":
+            op = tokens.pop(0)[0]
+            if sym_type != "ATTR":
+                raise ValueError("expected attr:* on left-hand-side of INTERSECTS")
+            t, value = tokens.pop(0)
+            if t != "SET":
+                raise ValueError("expected set on right-hand-side of INTERSECTS")
+            return (op, (sym_type, sym_name), value)
+
         else:
             return ("EQ", (sym_type, sym_name), True)
 
@@ -339,7 +348,7 @@ class _FilterSet:
         from the evaluation of the filter to improve evaluation performance.
         """
         f0, f1, f2 = f
-        if f0 in {"IN", "NOTIN"}:
+        if f0 in {"IN", "NOTIN", "INTERSECTS"}:
             self._sets.append(f2)
             return (f0, f1, len(self._sets) - 1)
         if f0 in {"AND", "OR"}:
@@ -431,7 +440,7 @@ class _FilterSet:
             seen.add(filter_name)
             return self._inline(self._filters[filter_name], seen, sets, flag_refs, rule_refs)
 
-        if f0 in {"IN", "NOTIN"}:
+        if f0 in {"IN", "NOTIN", "INTERSECTS"}:
             assert isinstance(f2, int)
             sets.append(self._sets[f2])
             return (f0, f1, len(sets) - 1)
@@ -465,7 +474,7 @@ class _FilterSet:
                 # We know for certain that the argument is a boolean. Negating it
                 # will always yield a boolean and will never raise an exception.
                 return f"(not ({self._pythonize(arg1)}))"
-            case "EQ" | "NE" | "LE" | "GE" | "GT" | "LT" | "IN" | "NOTIN":
+            case "EQ" | "NE" | "LE" | "GE" | "GT" | "LT" | "IN" | "NOTIN" | "INTERSECTS":
                 sym_type, sym_name = arg1
                 match sym_type:
                     case "FLAG":
@@ -484,6 +493,11 @@ class _FilterSet:
                             # Since `str/int in/not in set()` will always yield a boolean, the
                             # expression will never raise an exception.
                             return f"(isinstance(attributes.get({sym_name!r}), (str, int)) and {lhs} {self._py_op_map[op]} sets[{arg2!r}])"
+                        elif op == "INTERSECTS":
+                            # We check to ensure that the LHS is a set during runtime.
+                            # Since `set() & set()` will always yield a set and will never raise
+                            # an exception.
+                            return f"(isinstance(attributes.get({sym_name!r}), set) and bool({lhs} & sets[{arg2!r}]))"
                         else:
                             # Not all types are comparable with each other. So we need to
                             # ensure that the types are compatible before comparing them.
