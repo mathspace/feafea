@@ -35,6 +35,18 @@ class TestEvaluator(unittest.TestCase):
             }
         )
 
+    def test_incorrect_config_version(self):
+        evaluator = Evaluator()
+        config = CompiledConfig.from_dict({"flags": {}, "rules": {}})
+        config._feafea_checksum = "123"
+        with self.assertRaisesRegex(AssertionError, "incompatible config"):
+            evaluator.load_config(config)
+
+    def test_valid_config_checksum_after_serialization(self):
+        evaluator = Evaluator()
+        config = CompiledConfig.from_bytes(self._valid_config.to_bytes())
+        evaluator.load_config(config)
+
     def test_invalid_evaluator_usage(self):
         evaluator = Evaluator()
 

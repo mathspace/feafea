@@ -26,6 +26,13 @@ type Attributes = Mapping[str, AttributeValue]
 type DictConfig = Mapping[str, Any]
 
 
+# HACK: Use checksum of this file as the version for calculating the checksum
+# of the compiled config. This is a hack to ensure that the compiled config is
+# invalidated when the evaluator code changes.
+with open(__file__, "rb") as f:
+    _feafea_checksum = md5(f.read()).hexdigest()
+
+
 def _hash_percent(s: str, seed: str = "") -> float:
     """
     Hashes the given string and seed to a float in the range [0, 100).
@@ -664,8 +671,17 @@ class CompiledConfig:
     Compiled config that can be used to evaluate feature flags.
     """
 
-    __slots__ = ("flags",)
+    __slots__ = ("flags", "checksum", "_feafea_checksum")
     flags: dict[str, CompiledFlag]
+
+    # Checksum of the config. This can be used as a hash key to cache the compiled
+    # config. The checksum is derived from the dict config as well as the feafea
+    # version.
+    checksum: str
+
+    # Checked by the evaluator to ensure that the compiled config is compatible
+    # with the evaluator.
+    _feafea_checksum: str
 
     @staticmethod
     def from_bytes(b: bytes) -> CompiledConfig:
@@ -917,6 +933,12 @@ class CompiledConfig:
 
         cc = CompiledConfig()
         cc.flags = flags
+        cc._feafea_checksum = _feafea_checksum
+        chk = md5()
+        chk.update(cc._feafea_checksum.encode())
+        chk.update(b"-")
+        chk.update(json.dumps(c, sort_keys=True).encode())
+        cc.checksum = chk.hexdigest()
         return cc
 
 
@@ -1018,6 +1040,7 @@ class Evaluator:
         """
         Load the compiled config into the evaluator. load_config is thread-safe.
         """
+        assert config._feafea_checksum == _feafea_checksum, "incompatible config"
         with self._config_mu:
             self._config = config
 
