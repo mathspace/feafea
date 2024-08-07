@@ -37,29 +37,24 @@ class TestEvaluator(unittest.TestCase):
 
     def test_incorrect_config_version(self):
         evaluator = Evaluator()
-        config = CompiledConfig.from_dict({"flags": {}, "rules": {}})
+        config = CompiledConfig.from_dict({"flags": {"a": {"default": False}}, "rules": {}})
         config._feafea_checksum = "123"
         with self.assertRaisesRegex(AssertionError, "incompatible config"):
-            evaluator.load_config(config)
+            evaluator.evaluate(config, "a", "")
 
     def test_valid_config_checksum_after_serialization(self):
         evaluator = Evaluator()
         config = CompiledConfig.from_bytes(self._valid_config.to_bytes())
-        evaluator.load_config(config)
+        evaluator.evaluate(config, "a", "")
 
     def test_invalid_evaluator_usage(self):
         evaluator = Evaluator()
 
-        with self.assertRaisesRegex(RuntimeError, "config not loaded"):
-            evaluator.evaluate("a", "")
-
-        evaluator.load_config(self._valid_config)
-
         with self.assertRaisesRegex(ValueError, "does not exist in the config"):
-            evaluator.evaluate("z", "")
+            evaluator.evaluate(self._valid_config, "z", "")
 
         with self.assertRaisesRegex(TypeError, "must be a string"):
-            evaluator.evaluate("a", cast(str, 1))
+            evaluator.evaluate(self._valid_config, "a", cast(str, 1))
 
         invalid_attributes = [
             "non_dict",
@@ -74,50 +69,46 @@ class TestEvaluator(unittest.TestCase):
         ]
         for attr in invalid_attributes:
             with self.assertRaises(TypeError):
-                evaluator.evaluate("a", "", attr)
+                evaluator.evaluate(self._valid_config, "a", "", attr)
 
     def test_local_evaluator_evaluation(self):
         evaluator = Evaluator()
-        evaluator.load_config(self._valid_config)
+        cfg = self._valid_config
 
-        evs = evaluator.detailed_evaluate_all(["a", "b"], "")
+        evs = evaluator.detailed_evaluate_all(cfg, ["a", "b"], "")
         a = evs["a"]
         b = evs["b"]
         self.assertEqual((a.reason, a.rule, a.variant), ("default", "", False))
         self.assertEqual((b.reason, b.rule, b.variant), ("default", "", 1))
 
-        evs = evaluator.detailed_evaluate_all(["a", "b"], "", {"some_attr": 5, "some_other_attr": 6})
+        evs = evaluator.detailed_evaluate_all(cfg, ["a", "b"], "", {"some_attr": 5, "some_other_attr": 6})
         a = evs["a"]
         b = evs["b"]
         self.assertEqual((a.reason, a.rule, a.variant), ("const_rule", "r0", True))
         self.assertEqual((b.reason, b.rule, b.variant), ("const_rule", "r1", 3))
 
-        evs = evaluator.evaluate_all(["a", "b"], "")
+        evs = evaluator.evaluate_all(cfg, ["a", "b"], "")
         self.assertDictEqual(evs, {"a": False, "b": 1})
-        evs = evaluator.evaluate_all(["a", "b"], "", {"some_attr": 5, "some_other_attr": 6})
+        evs = evaluator.evaluate_all(cfg, ["a", "b"], "", {"some_attr": 5, "some_other_attr": 6})
         self.assertDictEqual(evs, {"a": True, "b": 3})
 
-        self.assertEqual(evaluator.evaluate("a", ""), False)
-        self.assertEqual(evaluator.evaluate("b", ""), 1)
-        self.assertEqual(evaluator.evaluate("a", "", {"some_attr": 5, "some_other_attr": 6}), True)
-        self.assertEqual(evaluator.evaluate("b", "", {"some_attr": 5, "some_other_attr": 6}), 3)
-
-        evaluator.set_default_attributes({"some_attr": 5, "some_other_attr": 6})
-        self.assertEqual(evaluator.evaluate("a", ""), True)
-        self.assertEqual(evaluator.evaluate("b", ""), 3)
+        self.assertEqual(evaluator.evaluate(cfg, "a", ""), False)
+        self.assertEqual(evaluator.evaluate(cfg, "b", ""), 1)
+        self.assertEqual(evaluator.evaluate(cfg, "a", "", {"some_attr": 5, "some_other_attr": 6}), True)
+        self.assertEqual(evaluator.evaluate(cfg, "b", "", {"some_attr": 5, "some_other_attr": 6}), 3)
 
     def test_record_evaluations(self):
         evaluator = Evaluator(record_evaluations=True)
-        evaluator.load_config(self._valid_config)
+        cfg = self._valid_config
 
-        evaluator.evaluate("a", "10", {"__now": 1000})
-        evaluator.evaluate("a", "12", {"__now": 1001})
-        evaluator.evaluate("a", "12", {"__now": 1002})
-        evaluator.evaluate("b", "18", {"__now": 1003})
-        evaluator.evaluate("a", "10", {"__now": 1004})
-        evaluator.evaluate("a", "18", {"__now": 1005})
-        evaluator.evaluate("a", "19", {"__now": 1006})
-        evaluator.evaluate("b", "88", {"__now": 1007, "some_other_attr": 6})
+        evaluator.evaluate(cfg, "a", "10", {"__now": 1000})
+        evaluator.evaluate(cfg, "a", "12", {"__now": 1001})
+        evaluator.evaluate(cfg, "a", "12", {"__now": 1002})
+        evaluator.evaluate(cfg, "b", "18", {"__now": 1003})
+        evaluator.evaluate(cfg, "a", "10", {"__now": 1004})
+        evaluator.evaluate(cfg, "a", "18", {"__now": 1005})
+        evaluator.evaluate(cfg, "a", "19", {"__now": 1006})
+        evaluator.evaluate(cfg, "b", "88", {"__now": 1007, "some_other_attr": 6})
 
         evals = evaluator.pop_evaluations()
 

@@ -39,10 +39,10 @@ compiled_config = CompiledConfig.from_dict({
   }
 })
 
-ev = Evaluator(compiled_config)
+ev = Evaluator()
 
-assert ev.evaluate("enable_feature_X", "user_1", {"user_type": "alpha"}) == False
-assert ev.evaluate("enable_feature_X", "user_2", {"user_type": "beta"}) == True
+assert ev.evaluate(compiled_config, "enable_feature_X", "user_1", {"user_type": "alpha"}) == False
+assert ev.evaluate(compiled_config, "enable_feature_X", "user_2", {"user_type": "beta"}) == True
 ```
 
 ## Concepts

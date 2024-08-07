@@ -229,11 +229,13 @@ def _parse_filter(f: str) -> _ParsedFilter:
 
     def parse_value_comparison(tokens: Any) -> Any:
         if tokens[0][0] in {"FILTER", "RULE"}:
-            # Filter and rule references can only ever evaluate to a boolean.
-            # Since we don't have true/false as literals in the rule, the only
-            # operand that makes sense is EQ. For NE, we simply prefix with NOT.
-            t = tokens[0][0]
-            return ("EQ", (t, tokens.pop(0)[1]), True)
+            sym_type, sym_name = tokens.pop(0)
+            if tokens[0][0] in {"EQ", "NE"}:
+                op = tokens.pop(0)[0]
+                if tokens[0][0] != "BOOL":
+                    raise ValueError(f"expected BOOL after '{op}' instead of '{tokens[0][1]}'")
+                return (op, (sym_type, sym_name), tokens.pop(0)[1])
+            return ("EQ", (sym_type, sym_name), True)
 
         if tokens[0][0] in {"STR", "INT"}:
             # The only time we can have a string or int as the left operand
@@ -992,20 +994,10 @@ class Evaluator:
     """
 
     def __init__(self, record_evaluations: bool = False):
-        self._default_attributes_mu = threading.RLock()
-        self._default_attributes: Attributes = {}
-        self._config_mu = threading.RLock()
-        self._config: CompiledConfig | None = None
-
         self._record_evaluations = record_evaluations
         if record_evaluations:
             self._evaluations_mu = threading.Lock()
             self._evaluations: list[FlagEvaluation] = []
-
-    def _get_default_attributes(self):
-        with self._default_attributes_mu:
-            attrs = self._default_attributes
-        return attrs
 
     @staticmethod
     def _validate_attributes_type(attributes: Attributes):
@@ -1023,27 +1015,6 @@ class Evaluator:
                 if not all(isinstance(e, type(fel)) for e in v):
                     raise TypeError("set values must be of the same type")
 
-    def set_default_attributes(self, attributes: Attributes = {}):
-        """
-        Set the default attributes to use when evaluating flags.
-        Attributs provided when evaluating flags will override these values.
-        This is useful for setting global attributes values that are always present
-        such as environment, region, etc.
-        set_default_attributes is thread-safe.
-        """
-        self._validate_attributes_type(attributes)
-        attributes = deepcopy(attributes)
-        with self._default_attributes_mu:
-            self._default_attributes = attributes
-
-    def load_config(self, config: CompiledConfig):
-        """
-        Load the compiled config into the evaluator. load_config is thread-safe.
-        """
-        assert config._feafea_checksum == _feafea_checksum, "incompatible config"
-        with self._config_mu:
-            self._config = config
-
     def _record_eval_metrics(self, e: FlagEvaluation, dur: float):
         labels = {
             "flag": e.flag,
@@ -1055,22 +1026,17 @@ class Evaluator:
         }
         _prom_eval_duration.labels(**labels).observe(dur)
 
-    def detailed_evaluate_all(self, names: Iterable[str], id: str, attributes: Attributes = {}) -> dict[str, FlagEvaluation]:
+    def detailed_evaluate_all(self, config: CompiledConfig, names: Iterable[str], id: str, attributes: Attributes = {}) -> dict[str, FlagEvaluation]:
         """
         Evaluate all flags for the given id and attributes and return
         FlagEvaluations. detailed_evaluate_all is thread-safe.
         """
-        self._validate_attributes_type(attributes)
+        assert config._feafea_checksum == _feafea_checksum, "incompatible config"
         if not isinstance(id, str):
             raise TypeError(f"id must be a string, not {type(id).__name__}")
-        default_attributes = self._get_default_attributes()
-        merged_attributes = {"__now": time.time(), **default_attributes, **attributes}
+        self._validate_attributes_type(attributes)
+        merged_attributes = {"__now": time.time(), **attributes}
         now = merged_attributes["__now"]
-
-        with self._config_mu:
-            config = self._config
-        if config is None:
-            raise RuntimeError("config not loaded")
 
         # Evaluate flags
 
@@ -1106,7 +1072,7 @@ class Evaluator:
             self._evaluations = []
             return es
 
-    def evaluate(self, name: str, id: str, attributes: Attributes = {}) -> Variant:
+    def evaluate(self, config: CompiledConfig, name: str, id: str, attributes: Attributes = {}) -> Variant:
         """
         Evaluate the given flag. evaluate is thread-safe.
 
@@ -1114,11 +1080,11 @@ class Evaluator:
         id: The id of the flag.
         attributes: The attributes to evaluate the flag with.
         """
-        return next(iter(self.detailed_evaluate_all([name], id, attributes).values())).variant
+        return next(iter(self.detailed_evaluate_all(config, [name], id, attributes).values())).variant
 
-    def evaluate_all(self, names: Iterable[str], id: str, attributes: Attributes = {}) -> dict[str, Variant]:
+    def evaluate_all(self, config: CompiledConfig, names: Iterable[str], id: str, attributes: Attributes = {}) -> dict[str, Variant]:
         """
         Evaluate all flags for the given id and attributes. evaluate_all is
         thread-safe.
         """
-        return {n: e.variant for n, e in self.detailed_evaluate_all(names, id, attributes).items()}
+        return {n: e.variant for n, e in self.detailed_evaluate_all(config, names, id, attributes).items()}

@@ -141,7 +141,7 @@ class TestValidConfig(unittest.TestCase):
                     "f1": "attr:at1 in [5,6,7]",
                     "f2": "flag:b = 1",
                     "f3": "filter:f1 and filter:f2 = true",
-                    "f4": "rule:r1",
+                    "f4": "rule:r1 != false",
                 },
                 "rules": {
                     "r0": {
@@ -248,7 +248,7 @@ class TestValidConfig(unittest.TestCase):
         self.assertSetEqual(set(self._valid_config.flags), {"a", "b", "c", "cc", "d", "e", "f", "g", "gg"})
         self.assertDictEqual(self._valid_config.flags["a"].metadata, {"category": "simple", "deprecated": False, "revision": 22})
         self.assertEqual(self._valid_config.flags["a"].name, "a")
-        self.assertTrue(self._valid_config.flags["a"].type == bool)
+        self.assertTrue(self._valid_config.flags["a"].type is bool)
         self.assertEqual(self._valid_config.flags["a"].default, True)
         self.assertEqual(self._valid_config.flags["a"].variants, {True, False})
 
