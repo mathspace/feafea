@@ -11,7 +11,6 @@ import threading
 from collections.abc import Callable
 from collections import defaultdict
 from typing import Any, Iterable, Literal, Mapping, Set
-from copy import deepcopy
 from hashlib import md5
 
 from prometheus_client import Histogram
