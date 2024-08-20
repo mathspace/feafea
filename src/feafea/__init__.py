@@ -262,7 +262,7 @@ def _parse_filter(f: str) -> _ParsedFilter:
             op = tokens.pop(0)[0]
             if tokens[0][0] == "BOOL":
                 if op not in {"EQ", "NE"}:
-                    raise ValueError(f"expected EQ/NE after '{op}' not BOOL")
+                    raise ValueError(f"expected EQ/NE before boolean '{tokens[0][1]}' not {op}")
             elif tokens[0][0] not in {"INT", "STR", "FLOAT"}:
                 raise ValueError(f"expected INT/STR/FLOAT after '{op}' not '{tokens[0][1]}'")
             t, value = tokens.pop(0)
@@ -511,6 +511,8 @@ class _FilterSet:
                             # ensure that the types are compatible before comparing them.
                             if isinstance(arg2, str):
                                 compat_types = "str"
+                            elif type(arg2) is bool:
+                                return f"((type(attributes.get({sym_name!r})) is bool) and {lhs} {self._py_op_map[op]} {arg2!r})"
                             elif isinstance(arg2, (int, float)):
                                 compat_types = "(int, float)"
                             else:
@@ -521,7 +523,7 @@ class _FilterSet:
                         # exists. This will therefore never raise an exception.
                         rule_name, split_name = sym_name
                         if split_name is not None:
-                            return f"rules[{rule_name!r}].eval(target_id, attributes)[0]"
+                            return f"rules[{rule_name!r}].eval(target_id, attributes)[0] is True"
                         else:
                             return f"rules[{rule_name!r}].eval(target_id, attributes) == (True, {split_name!r})"
                     case _:  # pragma: no cover

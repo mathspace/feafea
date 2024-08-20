@@ -72,6 +72,8 @@ class TestAttributeOnlyFilters(unittest.TestCase):
             ("not attr:a = 2", {"a": 3}, True),
             ("not attr:a = true", {"a": True}, False),
             ("not attr:a = false", {"a": True}, True),
+            # Type coercion
+            ("attr:pid = true", {"pid": 1}, False),
             # None
             ("attr:a = 2", {"a": None}, False),
             ("attr:a = 2 or attr:b = 3", {"a": None, "b": 3}, True),
@@ -128,10 +130,10 @@ class TestAttributeOnlyFilters(unittest.TestCase):
             ("attr:v > flag:rhs_flag_in_comp", ValueError, "expected INT/STR/FLOAT after 'GT'"),
             ("attr:v > 3.3 88", ValueError, "unexpected token '88'"),  # dangling literal
             ("flag:d >= 3.3", ValueError, "expected BOOL/STR/INT for feature flag comparison"),
-            ("attr:a > true", ValueError, "expected EQ/NE after"),
-            ("attr:a < true", ValueError, "expected EQ/NE after"),
-            ("attr:a >= true", ValueError, "expected EQ/NE after"),
-            ("attr:a <= false", ValueError, "expected EQ/NE after"),
+            ("attr:a > true", ValueError, "expected EQ/NE before boolean 'True' not GT"),
+            ("attr:a < true", ValueError, "expected EQ/NE before boolean 'True' not LT"),
+            ("attr:a >= true", ValueError, "expected EQ/NE before boolean 'True' not GE"),
+            ("attr:a <= false", ValueError, "expected EQ/NE before boolean 'False' not LE"),
             ("truefalse", ValueError, r"unexpected character 't' at position 0"),  # combined bool literals
             ("falset", ValueError, r"unexpected character 'f' at position 0"),
         ]
