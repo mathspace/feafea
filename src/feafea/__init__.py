@@ -112,11 +112,15 @@ _filter_token_re = re.compile(
             ),
             ("LPAREN", r"\("),
             ("RPAREN", r"\)"),
+            ("COMMA", r","),
             ("ATTR", r"attr:[a-zA-Z][a-zA-Z0-9_]*"),
             ("FLAG", r"flag:[a-zA-Z_][a-zA-Z0-9_]*"),
             ("FILTER", r"filter:[a-zA-Z_][a-zA-Z0-9_]*"),
             # Format of Rule reference: rule-name/optional-split-name
             ("RULE", r"rule:[a-zA-Z_][a-zA-Z0-9_]*(?:/[a-zA-Z][a-zA-Z0-9_]*)?"),
+            # Functions
+            ("FUNC", r"insplit\b"),
+            # Whitespace
             ("SPACE", r"\s+"),
             # Ensures we always have at least one token next in the list so we
             # won't have to check if token list is empty before indexing it in parse
@@ -226,7 +230,64 @@ def _parse_filter(f: str) -> _ParsedFilter:
             return ("NOT", expr, None)
         return parse_expr(tokens)
 
+    def parse_func(tokens: Any) -> tuple[Literal["FUNC"], str, list[Any]] | None:
+        """
+        Parses a function in the form of `func_name(arg1, arg2, ...)` where each
+        argument is a single value.
+        """
+        if tokens[0][0] != "FUNC":
+            return None
+        _, func_name = tokens.pop(0)
+        if tokens[0][0] != "LPAREN":
+            raise ValueError(f"expected '(' after function '{func_name}'")
+        tokens.pop(0)
+        args = []
+        while tokens[0][0] != "RPAREN":
+            arg = tokens.pop(0)
+            if arg[0] not in {"BOOL", "STR", "FLOAT", "INT", "ATTR", "FLAG", "FILTER", "RULE"}:
+                raise ValueError(f"expected single value as func arg instead of '{arg[1]}'")
+            args.append(arg)
+            if tokens[0][0] not in {"COMMA", "RPAREN"}:
+                raise ValueError(f"expected ',' or ')' instead of '{tokens[0][1]}' after func arg")
+            if tokens[0][0] == "COMMA":
+                tokens.pop(0)
+        tokens.pop(0)
+        return "FUNC", func_name, args
+
     def parse_value_comparison(tokens: Any) -> Any:
+        func_call = parse_func(tokens)
+        if func_call is not None:
+            _, func_name, func_args = func_call
+            match func_name:
+                # insplit(attr:*, int, int) -> bool
+                # Check if the attribute value, after hashing it to a float
+                # between 0 and 100, falls within the range of the two given
+                # numbers.
+                # If the attribute is a number, it's converted to a string. If
+                # the attribute is a set, any match in the set is considered a
+                # match.
+                case "insplit":
+                    if len(func_args) != 3:
+                        raise ValueError("insplit func takes three arguments")
+                    if func_args[0][0] != "ATTR":
+                        raise ValueError("expected attr:* as first argument to insplit")
+                    if not all(a[0] in {"INT", "FLOAT"} for a in func_args[1:]):
+                        raise ValueError("expected INT/FLOAT as second and third argument to insplit")
+                    if not all(float(a[1]) >= 0 for a in func_args[1:]):
+                        raise ValueError("expected positive numbers as second and third argument to insplit")
+                    if not all(float(a[1]) <= 100 for a in func_args[1:]):
+                        raise ValueError("expected numbers less than or equal to 100 as second and third argument to insplit")
+                    if not float(func_args[1][1]) < float(func_args[2][1]):
+                        raise ValueError("expected second argument to insplit to be less than third argument")
+                    if tokens[0][0] in {"EQ", "NE"}:
+                        op = tokens.pop(0)[0]
+                        if tokens[0][0] != "BOOL":
+                            raise ValueError("insplit can only be compared to a boolean")
+                        return (op, func_call, tokens.pop(0)[1])
+                    return ("EQ", func_call, True)
+                case _:
+                    raise ValueError(f"unknown function '{func_name}'")
+
         if tokens[0][0] in {"FILTER", "RULE"}:
             sym_type, sym_name = tokens.pop(0)
             if tokens[0][0] in {"EQ", "NE"}:
