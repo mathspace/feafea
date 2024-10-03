@@ -136,6 +136,14 @@ class TestAttributeOnlyFilters(unittest.TestCase):
             ("attr:a <= false", ValueError, "expected EQ/NE before boolean 'False' not LE"),
             ("truefalse", ValueError, r"unexpected character 't' at position 0"),  # combined bool literals
             ("falset", ValueError, r"unexpected character 'f' at position 0"),
+            ("insplit(1,2)", ValueError, r"insplit func takes three arguments"),
+            ("insplit(flag:a,1,2,3)", ValueError, r"insplit func takes three arguments"),
+            ("insplit(flag:a,1,2)", ValueError, r"expected attr:\* as first argument to insplit"),
+            ("insplit(attr:a, 1, 2) > 3", ValueError, r"unexpected token '>'"),
+            ("insplit(attr:a, 1, 2) = '55'", ValueError, r"insplit can only be compared to a boolean"),
+            ("insplit(attr:a, -1, 2)", ValueError, r"expected positive numbers as second and third argument to insplit"),
+            ("insplit(attr:a, 50, 40)", ValueError, r"expected second argument to insplit to be less than third argument"),
+            ("insplit(attr:a, 1, 101)", ValueError, r"expected numbers less than or equal to 100 as second and third argument to insplit"),
         ]
         for filter, err, regex in cases:
             with self.subTest(filter):
