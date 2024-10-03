@@ -422,6 +422,8 @@ class _FilterSet:
             return (f0, f1, len(self._sets) - 1)
         if f0 in {"AND", "OR"}:
             return f0, [self._extract_set_literals(i) for i in f1], f2
+        if f0 == "NOT":
+            return f0, self._extract_set_literals(f1), f2
         return f0, f1, f2
 
     def parse(self, name: str, filter: str):

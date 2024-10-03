@@ -72,6 +72,7 @@ class TestAttributeOnlyFilters(unittest.TestCase):
             ("not attr:a = 2", {"a": 3}, True),
             ("not attr:a = true", {"a": True}, False),
             ("not attr:a = false", {"a": True}, True),
+            ("not (attr:a in [1,2])", {"a": 1}, False),
             # Type coercion
             ("attr:pid = true", {"pid": 1}, False),
             # None
