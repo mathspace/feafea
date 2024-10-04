@@ -305,3 +305,48 @@ class TestAttributeOnlyFilters(unittest.TestCase):
         c = fs.compile("b", {}, {})
         self.assertDictEqual(c.flag_refs, {"xyz": str, "uwu": bool})
         self.assertSetEqual(c.rule_refs, {("abc", None), ("def", None), ("ghi", "A")})
+
+    def test_insplit_function_distribution_and_exclusivity(self):
+        fs = _FilterSet()
+        fs.parse("a", "insplit(attr:a, 0, 10)")
+        fs.parse("b", "insplit(attr:a, 10, 70)")
+        fs.parse("c", "insplit(attr:a, 70, 100)")
+        filter_a = fs.compile("a", {}, {})
+        filter_b = fs.compile("b", {}, {})
+        filter_c = fs.compile("c", {}, {})
+
+        variant_count = [0, 0, 0]
+        for id in range(100000):
+            if filter_a.eval("", {"a": id}):
+                variant_count[0] += 1
+            if filter_b.eval("", {"a": id}):
+                variant_count[1] += 1
+            if filter_c.eval("", {"a": id}):
+                variant_count[2] += 1
+
+        self.assertEqual(sum(variant_count), 100000)
+
+        self.assertAlmostEqual(variant_count[0] / 100000, 0.1, delta=0.002)
+        self.assertAlmostEqual(variant_count[1] / 100000, 0.6, delta=0.002)
+        self.assertAlmostEqual(variant_count[2] / 100000, 0.3, delta=0.002)
+
+    def test_insplit_function_seed_spread(self):
+        fs = _FilterSet()
+        fs.parse("a", "insplit(attr:a, 0, 50)")
+        filter = fs.compile("a", {}, {})
+
+        true_count = 0
+        false_count = 0
+        for id in range(100000):
+            # Here, we keep the attribute value constant and vary the seed and
+            # we expect the same distribution as if we were varying the
+            # attribute value.
+            if filter.eval("", {"a": "constant", "__seed": id}):
+                true_count += 1
+            else:
+                false_count += 1
+
+        self.assertEqual(true_count + false_count, 100000)
+
+        self.assertAlmostEqual(true_count / 100000, 0.5, delta=0.002)
+        self.assertAlmostEqual(false_count / 100000, 0.5, delta=0.002)
