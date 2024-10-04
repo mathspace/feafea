@@ -81,6 +81,17 @@ class TestAttributeOnlyFilters(unittest.TestCase):
             ("attr:a = 2 or attr:b = 3", {"b": 3}, True),
             ("attr:a", {}, False),
             ("not attr:a", {}, True),
+            # insplit function (ignoring seed)
+            ("insplit(attr:a, 0, 100) = true", {"a": 1}, True),  # int attr
+            ("insplit(attr:a, 0, 100)", {"a": 2}, True),  # int attr without comparison
+            ("insplit(attr:a, 0, 100)", {"a": "bat"}, True),  # str attr
+            ("insplit(attr:a, 0, 100)", {"a": 4.5}, True),  # float attr
+            ("insplit(attr:a, 0, 100)", {"a": False}, True),  # bool attr
+            ("insplit(attr:a, 0, 100)", {}, False),  # missing attr
+            ("insplit(attr:a, 0, 100)", {"a": {1, 2, 3}}, True),  # set of int attr
+            ("insplit(attr:a, 0, 100)", {"a": {"x", "y", "z"}}, True),  # set of str attr
+            ("insplit(attr:a, 0, 100)", {"a": {5.6, 8.2, 3.3}}, True),  # set of float attr
+            ("insplit(attr:a, 0, 100)", {"a": set()}, False),  # empty set
         ]
 
         for filter, attr, expected in cases:
