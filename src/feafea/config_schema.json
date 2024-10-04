@@ -111,12 +111,7 @@
             {
               "required": [
                 "variants"
-              ],
-              "not": {
-                "required": [
-                  "split_group"
-                ]
-              }
+              ]
             },
             {
               "required": [
