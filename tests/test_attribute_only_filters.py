@@ -72,6 +72,7 @@ class TestAttributeOnlyFilters(unittest.TestCase):
             ("not attr:a = 2", {"a": 3}, True),
             ("not attr:a = true", {"a": True}, False),
             ("not attr:a = false", {"a": True}, True),
+            ("not (attr:a in [1,2])", {"a": 1}, False),
             # Type coercion
             ("attr:pid = true", {"pid": 1}, False),
             # None
@@ -80,6 +81,17 @@ class TestAttributeOnlyFilters(unittest.TestCase):
             ("attr:a = 2 or attr:b = 3", {"b": 3}, True),
             ("attr:a", {}, False),
             ("not attr:a", {}, True),
+            # insplit function (ignoring seed)
+            ("insplit(attr:a, 0, 100) = true", {"a": 1}, True),  # int attr
+            ("insplit(attr:a, 0, 100)", {"a": 2}, True),  # int attr without comparison
+            ("insplit(attr:a, 0, 100)", {"a": "bat"}, True),  # str attr
+            ("insplit(attr:a, 0, 100)", {"a": 4.5}, True),  # float attr
+            ("insplit(attr:a, 0, 100)", {"a": False}, True),  # bool attr
+            ("insplit(attr:a, 0, 100)", {}, False),  # missing attr
+            ("insplit(attr:a, 0, 100)", {"a": {1, 2, 3}}, True),  # set of int attr
+            ("insplit(attr:a, 0, 100)", {"a": {"x", "y", "z"}}, True),  # set of str attr
+            ("insplit(attr:a, 0, 100)", {"a": {5.6, 8.2, 3.3}}, True),  # set of float attr
+            ("insplit(attr:a, 0, 100)", {"a": set()}, False),  # empty set
         ]
 
         for filter, attr, expected in cases:
@@ -136,6 +148,14 @@ class TestAttributeOnlyFilters(unittest.TestCase):
             ("attr:a <= false", ValueError, "expected EQ/NE before boolean 'False' not LE"),
             ("truefalse", ValueError, r"unexpected character 't' at position 0"),  # combined bool literals
             ("falset", ValueError, r"unexpected character 'f' at position 0"),
+            ("insplit(1,2)", ValueError, r"insplit func takes three arguments"),
+            ("insplit(flag:a,1,2,3)", ValueError, r"insplit func takes three arguments"),
+            ("insplit(flag:a,1,2)", ValueError, r"expected attr:\* as first argument to insplit"),
+            ("insplit(attr:a, 1, 2) > 3", ValueError, r"unexpected token '>'"),
+            ("insplit(attr:a, 1, 2) = '55'", ValueError, r"insplit can only be compared to a boolean"),
+            ("insplit(attr:a, -1, 2)", ValueError, r"expected positive numbers as second and third argument to insplit"),
+            ("insplit(attr:a, 50, 40)", ValueError, r"expected second argument to insplit to be less than third argument"),
+            ("insplit(attr:a, 1, 101)", ValueError, r"expected numbers less than or equal to 100 as second and third argument to insplit"),
         ]
         for filter, err, regex in cases:
             with self.subTest(filter):
@@ -285,3 +305,48 @@ class TestAttributeOnlyFilters(unittest.TestCase):
         c = fs.compile("b", {}, {})
         self.assertDictEqual(c.flag_refs, {"xyz": str, "uwu": bool})
         self.assertSetEqual(c.rule_refs, {("abc", None), ("def", None), ("ghi", "A")})
+
+    def test_insplit_function_distribution_and_exclusivity(self):
+        fs = _FilterSet()
+        fs.parse("a", "insplit(attr:a, 0, 10)")
+        fs.parse("b", "insplit(attr:a, 10, 70)")
+        fs.parse("c", "insplit(attr:a, 70, 100)")
+        filter_a = fs.compile("a", {}, {})
+        filter_b = fs.compile("b", {}, {})
+        filter_c = fs.compile("c", {}, {})
+
+        variant_count = [0, 0, 0]
+        for id in range(100000):
+            if filter_a.eval("", {"a": id}):
+                variant_count[0] += 1
+            if filter_b.eval("", {"a": id}):
+                variant_count[1] += 1
+            if filter_c.eval("", {"a": id}):
+                variant_count[2] += 1
+
+        self.assertEqual(sum(variant_count), 100000)
+
+        self.assertAlmostEqual(variant_count[0] / 100000, 0.1, delta=0.002)
+        self.assertAlmostEqual(variant_count[1] / 100000, 0.6, delta=0.002)
+        self.assertAlmostEqual(variant_count[2] / 100000, 0.3, delta=0.002)
+
+    def test_insplit_function_seed_spread(self):
+        fs = _FilterSet()
+        fs.parse("a", "insplit(attr:a, 0, 50)")
+        filter = fs.compile("a", {}, {})
+
+        true_count = 0
+        false_count = 0
+        for id in range(100000):
+            # Here, we keep the attribute value constant and vary the seed and
+            # we expect the same distribution as if we were varying the
+            # attribute value.
+            if filter.eval("", {"a": "constant", "__seed": id}):
+                true_count += 1
+            else:
+                false_count += 1
+
+        self.assertEqual(true_count + false_count, 100000)
+
+        self.assertAlmostEqual(true_count / 100000, 0.5, delta=0.002)
+        self.assertAlmostEqual(false_count / 100000, 0.5, delta=0.002)

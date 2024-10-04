@@ -112,11 +112,15 @@ _filter_token_re = re.compile(
             ),
             ("LPAREN", r"\("),
             ("RPAREN", r"\)"),
+            ("COMMA", r","),
             ("ATTR", r"attr:[a-zA-Z][a-zA-Z0-9_]*"),
             ("FLAG", r"flag:[a-zA-Z_][a-zA-Z0-9_]*"),
             ("FILTER", r"filter:[a-zA-Z_][a-zA-Z0-9_]*"),
             # Format of Rule reference: rule-name/optional-split-name
             ("RULE", r"rule:[a-zA-Z_][a-zA-Z0-9_]*(?:/[a-zA-Z][a-zA-Z0-9_]*)?"),
+            # Functions
+            ("FUNC", r"insplit\b"),
+            # Whitespace
             ("SPACE", r"\s+"),
             # Ensures we always have at least one token next in the list so we
             # won't have to check if token list is empty before indexing it in parse
@@ -226,7 +230,64 @@ def _parse_filter(f: str) -> _ParsedFilter:
             return ("NOT", expr, None)
         return parse_expr(tokens)
 
+    def parse_func(tokens: Any) -> tuple[Literal["FUNC"], str, list[Any]] | None:
+        """
+        Parses a function in the form of `func_name(arg1, arg2, ...)` where each
+        argument is a single value.
+        """
+        if tokens[0][0] != "FUNC":
+            return None
+        _, func_name = tokens.pop(0)
+        if tokens[0][0] != "LPAREN":
+            raise ValueError(f"expected '(' after function '{func_name}'")
+        tokens.pop(0)
+        args = []
+        while tokens[0][0] != "RPAREN":
+            arg = tokens.pop(0)
+            if arg[0] not in {"BOOL", "STR", "FLOAT", "INT", "ATTR", "FLAG", "FILTER", "RULE"}:
+                raise ValueError(f"expected single value as func arg instead of '{arg[1]}'")
+            args.append(arg)
+            if tokens[0][0] not in {"COMMA", "RPAREN"}:
+                raise ValueError(f"expected ',' or ')' instead of '{tokens[0][1]}' after func arg")
+            if tokens[0][0] == "COMMA":
+                tokens.pop(0)
+        tokens.pop(0)
+        return "FUNC", func_name, args
+
     def parse_value_comparison(tokens: Any) -> Any:
+        func_call = parse_func(tokens)
+        if func_call is not None:
+            _, func_name, func_args = func_call
+            match func_name:
+                # insplit(attr:*, int, int) -> bool
+                # Check if the attribute value, after hashing it to a float
+                # between 0 and 100, falls within the range of the two given
+                # numbers.
+                # If the attribute is a number, it's converted to a string. If
+                # the attribute is a set, any match in the set is considered a
+                # match.
+                case "insplit":
+                    if len(func_args) != 3:
+                        raise ValueError("insplit func takes three arguments")
+                    if func_args[0][0] != "ATTR":
+                        raise ValueError("expected attr:* as first argument to insplit")
+                    if not all(a[0] in {"INT", "FLOAT"} for a in func_args[1:]):
+                        raise ValueError("expected INT/FLOAT as second and third argument to insplit")
+                    if not all(float(a[1]) >= 0 for a in func_args[1:]):
+                        raise ValueError("expected positive numbers as second and third argument to insplit")
+                    if not all(float(a[1]) <= 100 for a in func_args[1:]):
+                        raise ValueError("expected numbers less than or equal to 100 as second and third argument to insplit")
+                    if not float(func_args[1][1]) < float(func_args[2][1]):
+                        raise ValueError("expected second argument to insplit to be less than third argument")
+                    if tokens[0][0] in {"EQ", "NE"}:
+                        op = tokens.pop(0)[0]
+                        if tokens[0][0] != "BOOL":
+                            raise ValueError("insplit can only be compared to a boolean")
+                        return (op, func_call, tokens.pop(0)[1])
+                    return ("EQ", func_call, True)
+                case _:
+                    assert False, "unreachable"  # pragma: no cover
+
         if tokens[0][0] in {"FILTER", "RULE"}:
             sym_type, sym_name = tokens.pop(0)
             if tokens[0][0] in {"EQ", "NE"}:
@@ -361,6 +422,8 @@ class _FilterSet:
             return (f0, f1, len(self._sets) - 1)
         if f0 in {"AND", "OR"}:
             return f0, [self._extract_set_literals(i) for i in f1], f2
+        if f0 == "NOT":
+            return f0, self._extract_set_literals(f1), f2
         return f0, f1, f2
 
     def parse(self, name: str, filter: str):
@@ -483,8 +546,31 @@ class _FilterSet:
                 # will always yield a boolean and will never raise an exception.
                 return f"(not ({self._pythonize(arg1)}))"
             case "EQ" | "NE" | "LE" | "GE" | "GT" | "LT" | "IN" | "NOTIN" | "INTERSECTS":
-                sym_type, sym_name = arg1
+                sym_type, sym_name, *sym_args = arg1
                 match sym_type:
+                    case "FUNC":
+                        func_name, func_args = sym_name, sym_args[0]
+                        if func_name == "insplit":
+                            # We have two types of attributes we need to handle,
+                            # sets and single values. All values and set values
+                            # must be handled. For single values, we convert
+                            # them to strings, hash them to a float between 0
+                            # and 100 and check if they fall within the range of
+                            # the two given numbers. For set values, we check if
+                            # any value in the set after conversion to string
+                            # and hashing falls within the range of the two
+                            # given numbers.
+                            #
+                            # A __seed attribute is expected to exist in the
+                            # attributes dict. This will be set by the rule
+                            # evaluator.
+                            attr_name, min_val, max_val = func_args
+
+                            all_to_set = f"attributes[{attr_name[1]!r}] if isinstance(attributes.get({attr_name[1]!r}), set) else set([attributes.get({attr_name[1]!r})])"
+                            any_in_set = f"any(v is not None and {min_val[1]!r} <= _hash_percent(str(v), attributes.get('__seed', '')) < {max_val[1]!r} for v in ({all_to_set}))"
+                            return f"({any_in_set} {self._py_op_map[op]} {arg2!r})"
+                        else:
+                            assert False, "unreachable"  # pragma: no cover
                     case "FLAG":
                         # Further stages of compilation ensure that the referenced flag here
                         # exists and has the same type as the inferred type from the filter.
@@ -557,6 +643,7 @@ def a(target_id, attributes):
             "sets": sets,
             "flags": flags,
             "rules": rules,
+            "_hash_percent": _hash_percent,
         }
         exec(py_code, _globals, _locals)
         comp_filter = _CompiledFilter()
@@ -798,6 +885,7 @@ class CompiledConfig:
                 cf = filters.compile("rule:" + rule_name, flags, compiled_rules)
                 compiled_rule._compiled_filter = cf
                 globals["match"] = cf.eval
+                py_common += [f"attributes['__seed'] = {r.get("split_group", rule_name)!r}"]
                 py_common += ["if not match(target_id, attributes): return None"]
 
             if "schedule" in r:
