@@ -286,7 +286,7 @@ def _parse_filter(f: str) -> _ParsedFilter:
                         return (op, func_call, tokens.pop(0)[1])
                     return ("EQ", func_call, True)
                 case _:
-                    raise ValueError(f"unknown function '{func_name}'")
+                    assert False, "unreachable"  # pragma: no cover
 
         if tokens[0][0] in {"FILTER", "RULE"}:
             sym_type, sym_name = tokens.pop(0)
@@ -546,8 +546,31 @@ class _FilterSet:
                 # will always yield a boolean and will never raise an exception.
                 return f"(not ({self._pythonize(arg1)}))"
             case "EQ" | "NE" | "LE" | "GE" | "GT" | "LT" | "IN" | "NOTIN" | "INTERSECTS":
-                sym_type, sym_name = arg1
+                sym_type, sym_name, *sym_args = arg1
                 match sym_type:
+                    case "FUNC":
+                        func_name, func_args = sym_name, sym_args[0]
+                        if func_name == "insplit":
+                            # We have two types of attributes we need to handle,
+                            # sets and single values. All values and set values
+                            # must be handled. For single values, we convert
+                            # them to strings, hash them to a float between 0
+                            # and 100 and check if they fall within the range of
+                            # the two given numbers. For set values, we check if
+                            # any value in the set after conversion to string
+                            # and hashing falls within the range of the two
+                            # given numbers.
+                            #
+                            # A __seed attribute is expected to exist in the
+                            # attributes dict. This will be set by the rule
+                            # evaluator.
+                            attr_name, min_val, max_val = func_args
+
+                            all_to_set = f"attributes[{attr_name[1]!r}] if isinstance(attributes.get({attr_name[1]!r}), set) else set([attributes.get({attr_name[1]!r})])"
+                            any_in_set = f"any(v is not None and {min_val[1]!r} <= _hash_percent(str(v), attributes.get('__seed', '')) < {max_val[1]!r} for v in ({all_to_set}))"
+                            return f"({any_in_set} {self._py_op_map[op]} {arg2!r})"
+                        else:
+                            assert False, "unreachable"  # pragma: no cover
                     case "FLAG":
                         # Further stages of compilation ensure that the referenced flag here
                         # exists and has the same type as the inferred type from the filter.
@@ -620,6 +643,7 @@ def a(target_id, attributes):
             "sets": sets,
             "flags": flags,
             "rules": rules,
+            "_hash_percent": _hash_percent,
         }
         exec(py_code, _globals, _locals)
         comp_filter = _CompiledFilter()
@@ -861,6 +885,7 @@ class CompiledConfig:
                 cf = filters.compile("rule:" + rule_name, flags, compiled_rules)
                 compiled_rule._compiled_filter = cf
                 globals["match"] = cf.eval
+                py_common += [f"attributes['__seed'] = {r.get("split_group", rule_name)!r}"]
                 py_common += ["if not match(target_id, attributes): return None"]
 
             if "schedule" in r:
