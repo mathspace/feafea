@@ -885,7 +885,7 @@ class CompiledConfig:
                 cf = filters.compile("rule:" + rule_name, flags, compiled_rules)
                 compiled_rule._compiled_filter = cf
                 globals["match"] = cf.eval
-                py_common += [f"attributes['__seed'] = {r.get("split_group", rule_name)!r}"]
+                py_common += [f"attributes['__seed'] = {r.get('split_group', rule_name)!r}"]
                 py_common += ["if not match(target_id, attributes): return None"]
 
             if "schedule" in r:
@@ -901,8 +901,8 @@ class CompiledConfig:
                 py_common += [f"if attributes['__now'] >= {end!r}: return None"]
 
                 if ramp_up > 0 or ramp_down > 0:
-                    scheduele_seed = rule_name + "\0schedule"
-                    py_common = [f"schedule_target_percent = _hash_percent(target_id, seed={scheduele_seed!r})"]
+                    schedule_seed = rule_name + "\0schedule"
+                    py_common = [f"schedule_target_percent = _hash_percent(target_id, seed={schedule_seed!r})"]
                 if ramp_up > 0:
                     py_common += [f"ramp_up_percent = 100 * (attributes['__now'] - {start!r}) / {ramp_up!r}"]
                     py_common += ["if schedule_target_percent >= ramp_up_percent: return None"]
