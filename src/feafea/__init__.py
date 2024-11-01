@@ -32,7 +32,7 @@ with open(__file__, "rb") as f:
     _feafea_checksum = md5(f.read()).hexdigest()
 
 
-def _hash_percent(s: str, seed: str = "") -> float:
+def _hash_percent(s: Any, seed: str = "") -> float:
     """
     Hashes the given string and seed to a float in the range [0, 100).
 
@@ -631,6 +631,7 @@ class _FilterSet:
         Compile the filter into a callable form.
         """
         comp_filter = _CompiledFilter()
+        comp_filter.uses_insplit = False
 
         seen = set()
         sets: list[set] = []
@@ -692,7 +693,7 @@ class _CompiledFlagRule:
 
     __slots__ = ("rule_name", "eval")
     rule_name: str
-    eval: Callable[[TargetID, Attributes], Variant | tuple[Variant, str] | None]
+    eval: Callable[[TargetID, Attributes], Variant | tuple[Variant, str, list[AttributeValue]] | None]
 
 
 class CompiledFlag:
@@ -721,12 +722,13 @@ class CompiledFlag:
         e.flag = self.name
         e.target_id = target_id
         e.split = ""
+        e.split_attribute_values = []
         for rule in self._rules:
             v = rule.eval(target_id, attributes)
             if v is not None:
                 e.rule = rule.rule_name
                 if isinstance(v, tuple):
-                    e.variant, e.split = v
+                    e.variant, e.split, e.split_attribute_values = v
                     e.reason = "split_rule"
                 else:
                     e.variant = v
@@ -925,18 +927,23 @@ class CompiledConfig:
                     raise ValueError("insplit filter and split rules cannot be used in the same rule")
                 compiled_rule.split_names.update(s["name"] for s in r["splits"] if "name" in s)
                 split_seed = r.get("split_group", rule_name)
-                py_common += [f"split_target_percent = _hash_percent(target_id, seed={split_seed!r})"]
+                split_attribute = r.get("split_attribute")
+                # Build a map of (attribute value -> percent) for each attribute value.
+                if split_attribute is None:
+                    py_common += [f"split_percents = {'{'}target_id:_hash_percent(target_id, seed={split_seed!r}){'}'}"]
+                else:
+                    py_common += [f"split_attribute = attributes[{split_attribute}] if isinstance(attributes.get({split_attribute}), set) else [attributes.get({split_attribute})]"]
+                    py_common += [f"split_percents = {'{'}(v:_hash_percent(v, seed={split_seed!r}) for v in split_attribute)"]
                 comulative_percentage_start = 0
                 comulative_percentage_end = 0
                 for split in r["splits"]:
                     comulative_percentage_end += split["percentage"]
-                    py_common += [
-                        f"#FIRULE if split_target_percent >= {comulative_percentage_start!r} and split_target_percent < {comulative_percentage_end!r}: return (True, {split.get("name", "")!r})"
-                    ]
+                    matched_attr_values = f"matched_attr_values = [v for v, p in split_percents.items() if {comulative_percentage_start!r} <= p < {comulative_percentage_end!r}]"
+                    py_common += ["#FIRULE " + matched_attr_values]
+                    py_common += [f"#FIRULE if matched_attr_values: return (True, {split.get("name", "")!r})"]
                     for flag, variant in split.get("variants", {}).items():
-                        py_flag[flag].append(
-                            f"if split_target_percent >= {comulative_percentage_start!r} and split_target_percent < {comulative_percentage_end!r}: return ({variant!r}, {split.get("name", "")!r})"
-                        )
+                        py_flag[flag].append(matched_attr_values)
+                        py_flag[flag].append(f"if matched_attr_values: return ({variant!r}, {split.get("name", "")!r}, matched_attr_values)")
                     comulative_percentage_start += split["percentage"]
 
             # Compile the flag independent rule.
@@ -964,9 +971,9 @@ class CompiledConfig:
             for flag, py_lines in py_flag.items():
                 if not py_lines:
                     assert False, "unreachable"  # pragma: no cover
-                # Returns variant | (variant, split_name) | None
+                # Returns variant | (variant, split_name, split_attr_values) | None
                 # - variant: The variant evaluated for non-split rule
-                # - (variant, split_name): The variant evaluated for split rule
+                # - (variant, split_name, split_attr_values): The variant evaluated for split rule
                 # - None: The rule does not apply
                 lines = ["def a(target_id, attributes):"]
                 lines += list(f"  {line}" for line in (py_common + py_lines))
@@ -1057,6 +1064,7 @@ class FlagEvaluation:
         "rule",
         "reason",
         "split",
+        "split_attribute_values",
         "timestamp",
     )
     flag: str
@@ -1066,6 +1074,7 @@ class FlagEvaluation:
     rule: str | Literal[""]
     reason: Literal["split_rule", "const_rule", "default"]
     split: str | Literal[""]
+    split_attribute_values: list[AttributeValue]
     timestamp: float
 
 
