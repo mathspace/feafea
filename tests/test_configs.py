@@ -337,6 +337,55 @@ class TestValidConfig(unittest.TestCase):
         self.assertAlmostEqual(variant_count[3] / 100000, 0.6, delta=0.002)
         self.assertAlmostEqual(variant_count[1] / 100000, 0.3, delta=0.002)
 
+    def test_valid_split_probability_on_single_value_attribute(self):
+        config = {
+            "flags": {
+                "a": {"variants": [1, 2, 3], "default": 1},
+            },
+            "rules": {
+                "r1": {
+                    "split_attribute": "school_id",
+                    "splits": [
+                        {"percentage": 10, "variants": {"a": 2}},
+                        {"percentage": 60, "variants": {"a": 3}},
+                    ],
+                },
+            },
+        }
+        variant_count = {1: 0, 2: 0, 3: 0}
+        cc = CompiledConfig.from_dict(config)
+        for id in range(100000):
+            v = cc.flags["a"].eval("", {"school_id": str(id)}).variant
+            assert isinstance(v, int)
+            variant_count[v] += 1
+        self.assertAlmostEqual(variant_count[2] / 100000, 0.1, delta=0.002)
+        self.assertAlmostEqual(variant_count[3] / 100000, 0.6, delta=0.002)
+        self.assertAlmostEqual(variant_count[1] / 100000, 0.3, delta=0.002)
+
+    def test_valid_split_probability_on_multi_value_attribute(self):
+        config = {
+            "flags": {
+                "a": {"variants": [1, 2, 3], "default": 1},
+            },
+            "rules": {
+                "r1": {
+                    "split_attribute": "school_ids",
+                    "splits": [
+                        {"percentage": 10, "variants": {"a": 2}},
+                        {"percentage": 60, "variants": {"a": 3}},
+                    ],
+                },
+            },
+        }
+        cc = CompiledConfig.from_dict(config)
+        for id in range(100000):
+            v = cc.flags["a"].eval("", {"school_ids": str(id)}).variant
+            assert isinstance(v, int)
+            variant_count[v] += 1
+        self.assertAlmostEqual(variant_count[2] / 100000, 0.1, delta=0.002)
+        self.assertAlmostEqual(variant_count[3] / 100000, 0.6, delta=0.002)
+        self.assertAlmostEqual(variant_count[1] / 100000, 0.3, delta=0.002)
+
     def test_valid_schedule(self):
         cases = [
             # schedule, ts, expected

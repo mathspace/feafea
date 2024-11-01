@@ -932,8 +932,8 @@ class CompiledConfig:
                 if split_attribute is None:
                     py_common += [f"split_percents = {'{'}target_id:_hash_percent(target_id, seed={split_seed!r}){'}'}"]
                 else:
-                    py_common += [f"split_attribute = attributes[{split_attribute}] if isinstance(attributes.get({split_attribute}), set) else [attributes.get({split_attribute})]"]
-                    py_common += [f"split_percents = {'{'}(v:_hash_percent(v, seed={split_seed!r}) for v in split_attribute)"]
+                    py_common += [f"split_attribute = attributes[{split_attribute!r}] if isinstance(attributes.get({split_attribute!r}), set) else [attributes.get({split_attribute!r})]"]
+                    py_common += [f"split_percents = {'{'}v:_hash_percent(v, seed={split_seed!r}) for v in split_attribute{'}'}"]
                 comulative_percentage_start = 0
                 comulative_percentage_end = 0
                 for split in r["splits"]:
