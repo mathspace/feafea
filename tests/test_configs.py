@@ -477,6 +477,7 @@ class TestInvalidConfigs(unittest.TestCase):
             ({"variants": {"a": 2}, "schedule": {"start": "2024-10-10 10:10:10", "end": "2024-10-10 20:20:20"}}, ValueError, "Timezone missing"),
             ({"variants": {"a": 2}, "schedule": {"start": "2024-10-10 20:10:10Z", "end": "2024-10-10 10:20:20Z"}}, ValueError, "start must be before end"),
             ({"variants": {"a": 2}, "schedule": {"start": "2024-10-10 10:10:10Z", "end": "2024-10-10 10:10:10Z"}}, ValueError, "start must be before end"),
+            ({"filter": "insplit(attr:abc, 0, 10)", "splits": [{"percentage": 10}]}, ValueError, "insplit filter and split rules cannot be used in the same rule"),
             (
                 {"variants": {"a": 2}, "schedule": {"start": "2024-10-10 10:10:00Z", "end": "2024-10-10 10:20:00Z", "ramp_up": "8m", "ramp_down": "8m"}},
                 ValueError,

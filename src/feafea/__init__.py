@@ -365,7 +365,7 @@ class _CompiledFilter:
     The compiled filter function.
     """
 
-    __slots__ = ("eval", "flag_refs", "rule_refs")
+    __slots__ = ("eval", "flag_refs", "rule_refs", "uses_insplit")
 
     # The compiled filter function.
     eval: Callable[[TargetID, Attributes], bool]
@@ -377,6 +377,9 @@ class _CompiledFilter:
     # The set of rule names/splits referenced in the filter. This is used to ensure
     # no circular references to rules occur.
     rule_refs: set[tuple[str, str | None]]
+    # Whether the filter uses the insplit function. This is used to disallow the
+    # simultaneous use of insplit and split rules in the same rule.
+    uses_insplit: bool
 
     # Filter references are not needed since filter references in a filter are
     # inlined during compilation and any circular references checked.
@@ -528,7 +531,7 @@ class _FilterSet:
 
         return (f0, f1, f2)
 
-    def _pythonize(self, f: _ParsedFilter) -> str:
+    def _pythonize(self, f: _ParsedFilter, visited_insplit: Callable[[], None]) -> str:
         """
         Convert the parse tree into a python expression.
 
@@ -540,17 +543,18 @@ class _FilterSet:
             case "AND" | "OR":
                 # We know for certain that lhs and rhs are booleans. AND/ORing them
                 # together will always yield a boolean and will never raise an exception.
-                return f" {self._py_op_map[op]} ".join(f"({self._pythonize(a)})" for a in arg1)
+                return f" {self._py_op_map[op]} ".join(f"({self._pythonize(a, visited_insplit)})" for a in arg1)
             case "NOT":
                 # We know for certain that the argument is a boolean. Negating it
                 # will always yield a boolean and will never raise an exception.
-                return f"(not ({self._pythonize(arg1)}))"
+                return f"(not ({self._pythonize(arg1, visited_insplit)}))"
             case "EQ" | "NE" | "LE" | "GE" | "GT" | "LT" | "IN" | "NOTIN" | "INTERSECTS":
                 sym_type, sym_name, *sym_args = arg1
                 match sym_type:
                     case "FUNC":
                         func_name, func_args = sym_name, sym_args[0]
                         if func_name == "insplit":
+                            visited_insplit()
                             # We have two types of attributes we need to handle,
                             # sets and single values. All values and set values
                             # must be handled. For single values, we convert
@@ -626,13 +630,19 @@ class _FilterSet:
         """
         Compile the filter into a callable form.
         """
+        comp_filter = _CompiledFilter()
+
         seen = set()
         sets: list[set] = []
         flag_refs: dict[str, type] = {}
         rule_refs: set[tuple[str, str | None]] = set()
         inlined = self._inline(self._filters[name], seen, sets, flag_refs, rule_refs)
         optimized = self._optimize(inlined)
-        py_expr = self._pythonize(optimized)
+
+        def visited_insplit():
+            comp_filter.uses_insplit = True
+
+        py_expr = self._pythonize(optimized, visited_insplit)
         code_str = f"""
 def a(target_id, attributes):
     return {py_expr}
@@ -646,7 +656,6 @@ def a(target_id, attributes):
             "_hash_percent": _hash_percent,
         }
         exec(py_code, _globals, _locals)
-        comp_filter = _CompiledFilter()
         comp_filter.eval = _locals["a"]
         comp_filter.flag_refs = flag_refs
         comp_filter.rule_refs = rule_refs
@@ -912,6 +921,8 @@ class CompiledConfig:
 
             compiled_rule.split_names = set()
             if "splits" in r:
+                if hasattr(compiled_rule, "_compiled_filter") and compiled_rule._compiled_filter.uses_insplit:
+                    raise ValueError("insplit filter and split rules cannot be used in the same rule")
                 compiled_rule.split_names.update(s["name"] for s in r["splits"] if "name" in s)
                 split_seed = r.get("split_group", rule_name)
                 py_common += [f"split_target_percent = _hash_percent(target_id, seed={split_seed!r})"]
