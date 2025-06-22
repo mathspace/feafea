@@ -1,6 +1,8 @@
 import unittest
+import functools
 from src.feafea import _FilterSet
 
+_FilterSet = functools.partial(_FilterSet, ignore_undefined_refs=True)
 
 class TestAttributeOnlyFilters(unittest.TestCase):
     def test_simple(self):
@@ -264,8 +266,15 @@ class TestAttributeOnlyFilters(unittest.TestCase):
     def test_missing_ref_filter(self):
         fs = _FilterSet()
         fs.parse("a", "filter:b")
-        with self.assertRaisesRegex(ValueError, "unknown filter b"):
-            fs.compile("a", {}, {})
+        fs.parse("c", "filter:a")
+        fs.parse("d", "filter:c or filter:e")
+        fs.parse("e", "attr:age > 10")
+        c = fs.compile("a", {}, {})
+        self.assertFalse(c.eval("", {}))
+        c = fs.compile("c", {}, {})
+        self.assertFalse(c.eval("", {}))
+        c = fs.compile("e", {}, {})
+        self.assertTrue(c.eval("", {"age": 20}))
 
     def test_rule_and_flag_refs(self):
         fs = _FilterSet()

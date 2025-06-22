@@ -1,78 +1,17 @@
 import unittest
+import functools
 
 from jsonschema.exceptions import ValidationError
 
-from src.feafea import CompiledConfig, _seconds_from_human_duration, merge_configs
+from src.feafea import CompiledConfig
 
-
-class TestMergeConfig(unittest.TestCase):
-    def test_merge_config(self):
-        config1 = {
-            "flags": {"a": {"variants": [True, False], "default": True}},
-        }
-        config2 = {
-            "flags": {"b": {"variants": [1, 2], "default": 1}},
-            "filters": {"f1": "flag:a = True"},
-        }
-        config3 = {
-            "rules": {"r1": {"variants": {"a": False}}},
-        }
-        merged = {
-            "flags": {
-                "a": {"variants": [True, False], "default": True},
-                "b": {"variants": [1, 2], "default": 1},
-            },
-            "filters": {"f1": "flag:a = True"},
-            "rules": {"r1": {"variants": {"a": False}}},
-        }
-        m1 = merge_configs(config1, config2, config3)
-        m2 = merge_configs(config2, config1, config3)
-        m3 = merge_configs(config3, config2, config1)
-        self.assertDictEqual(m1, merged)
-        self.assertDictEqual(m2, merged)
-        self.assertDictEqual(m3, merged)
-        with self.assertRaisesRegex(ValueError, "Duplicate key"):
-            merge_configs(config1, config1)
-
-
-class TestHumanDuration(unittest.TestCase):
-    def test_human_duration(self):
-        cases = [
-            # human duration, seconds
-            ("0m", 0),
-            ("0d", 0),
-            ("0h", 0),
-            ("1m", 60),
-            ("1h", 3600),
-            ("1d", 86400),
-            ("48h 5m", 48 * 3600 + 5 * 60),
-            ("48h5m", 48 * 3600 + 5 * 60),
-            ("1d 3h", 86400 + 3 * 3600),
-            ("1d 3h 5m", 86400 + 3 * 3600 + 5 * 60),
-            ("1d3h5m", 86400 + 3 * 3600 + 5 * 60),
-            ("2d 5m", 2 * 86400 + 5 * 60),  # no hours
-        ]
-        for dur, int in cases:
-            with self.subTest(dur):
-                self.assertEqual(_seconds_from_human_duration(dur), int)
-
-    def test_invalid_human_duration(self):
-        cases = [
-            "1",
-            "1d -3h",
-            "-1d",
-            "5s",
-        ]
-        for dur in cases:
-            with self.subTest(dur):
-                with self.assertRaises(ValueError):
-                    _seconds_from_human_duration(dur)
+CompiledConfig_from_dict = functools.partial(CompiledConfig.from_dict, ignore_undefined_refs=True)
 
 
 class TestValidConfig(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls._valid_config = CompiledConfig.from_dict(
+        cls._valid_config = CompiledConfig_from_dict(
             {
                 "flags": {
                     "a": {
@@ -139,9 +78,10 @@ class TestValidConfig(unittest.TestCase):
                 },
                 "filters": {
                     "f1": "attr:at1 in [5,6,7]",
-                    "f2": "flag:b = 1",
+                    "f2": "flag:b = 1 or flag:nonexistent = 55 or rule:nonexistent = true",
                     "f3": "filter:f1 and filter:f2 = true",
                     "f4": "rule:r1 != false",
+                    "fbad": "filter:who and flag:what or rule:where or filter:f2",
                 },
                 "rules": {
                     "r0": {
@@ -224,6 +164,7 @@ class TestValidConfig(unittest.TestCase):
                                 "percentage": 50,
                                 "variants": {
                                     "f": "up",
+                                    "nonexistent": "apply",
                                 },
                             },
                             {
@@ -241,7 +182,7 @@ class TestValidConfig(unittest.TestCase):
                         },
                     },
                 },
-            }
+            },
         )
 
     def test_valid_config_high_level(self):
@@ -328,7 +269,7 @@ class TestValidConfig(unittest.TestCase):
             },
         }
         variant_count = {1: 0, 2: 0, 3: 0}
-        cc = CompiledConfig.from_dict(config)
+        cc = CompiledConfig_from_dict(config)
         for id in range(100000):
             v = cc.flags["a"].eval(str(id), {}).variant
             assert isinstance(v, int)
@@ -353,12 +294,12 @@ class TestValidConfig(unittest.TestCase):
         tpl_rule = {"variants": {"a": True}}
         for schedule, ts, expected in cases:
             with self.subTest(f"{schedule}, {ts}"):
-                cc = CompiledConfig.from_dict({**tpl_config, "rules": {"r1": {**tpl_rule, "schedule": schedule}}})
+                cc = CompiledConfig_from_dict({**tpl_config, "rules": {"r1": {**tpl_rule, "schedule": schedule}}})
                 ev = cc.flags["a"].eval("", {"__now": ts})
                 self.assertEqual(ev.variant, expected)
 
     def test_valid_schedule_ramp(self):
-        cc = CompiledConfig.from_dict(
+        cc = CompiledConfig_from_dict(
             {
                 "flags": {
                     "ramp": {
@@ -377,7 +318,7 @@ class TestValidConfig(unittest.TestCase):
                         },
                     },
                 },
-            }
+            },
         )
 
         non_default_count = 0
@@ -398,7 +339,7 @@ class TestValidConfig(unittest.TestCase):
 class TestInvalidConfigs(unittest.TestCase):
     def test_invalid_flag_def(self):
         with self.assertRaisesRegex(ValidationError, "."):
-            CompiledConfig.from_dict({"flags": "not a dict"})
+            CompiledConfig_from_dict({"flags": "not a dict"})
 
         cases = [
             ({}, ValidationError, "."),
@@ -414,10 +355,10 @@ class TestInvalidConfigs(unittest.TestCase):
         for case, expected_err, regex in cases:
             with self.subTest(case):
                 with self.assertRaisesRegex(expected_err, regex):
-                    CompiledConfig.from_dict({"flags": {"a": case}})
+                    CompiledConfig_from_dict({"flags": {"a": case}})
 
         with self.assertRaisesRegex(ValueError, "already an alias"):
-            CompiledConfig.from_dict(
+            CompiledConfig_from_dict(
                 {
                     "flags": {
                         "a": {
@@ -427,20 +368,20 @@ class TestInvalidConfigs(unittest.TestCase):
                         "b": {"alias": "a"},
                         "c": {"alias": "b"},
                     },
-                }
+                },
             )
 
     def test_invalid_filter_def(self):
         with self.assertRaisesRegex(ValidationError, "."):
-            CompiledConfig.from_dict({"filters": "not a dict"})
+            CompiledConfig_from_dict({"filters": "not a dict"})
 
     def test_invalid_root_def(self):
         with self.assertRaisesRegex(ValidationError, "."):
-            CompiledConfig.from_dict({"": "not a dict"})
+            CompiledConfig_from_dict({"": "not a dict"})
 
     def test_invalid_rules_def(self):
         with self.assertRaisesRegex(ValidationError, "."):
-            CompiledConfig.from_dict({"rules": "not a dict"})
+            CompiledConfig_from_dict({"rules": "not a dict"})
 
         tpl_config = {
             "flags": {
@@ -459,8 +400,6 @@ class TestInvalidConfigs(unittest.TestCase):
             ({}, ValidationError, "."),
             ({"variants": {"a": 4}}, ValueError, "unknown flag/variant"),  # non-existing variant
             ({"splits": [{"percentage": 10, "variants": {"a": 4}}]}, ValueError, "unknown flag/variant"),  # non-existing variant
-            ({"variants": {"b": True}}, ValueError, "unknown flag/variant"),  # non-existing flag
-            ({"splits": [{"percentage": 10, "variants": {"b": True}}]}, ValueError, "unknown flag/variant"),  # non-existing flag
             ({"variants": {"a": 1}, "splits": [{"percentage": 10}]}, ValidationError, "."),  # both splits and const
             ({"splits": [{"percentage": 20}, {"percentage": 90}]}, ValueError, "must sum to 100 or less"),  # >100 percentage
             ({"splits": [{"percentage": -10}]}, ValidationError, "minimum"),  # <=0 percentage
@@ -469,8 +408,6 @@ class TestInvalidConfigs(unittest.TestCase):
             ({"split_group": 12}, ValidationError, "."),
             ({"variants": {"a": 4}, "split_group": 12}, ValidationError, "."),  # cannot combine split_group with variants
             ({"metadata": "abc"}, ValidationError, "."),
-            ({"variants": {"a": 2}, "filter": "flag:b = 4"}, ValueError, "unknown flag"),  # unknown flag in filter
-            ({"variants": {"a": 2}, "filter": "rule:unknown"}, ValueError, "unknown rule"),  # unknown rule in filter
             ({"variants": {"a": 2}, "filter": "rule:r1"}, ValueError, "circular"),
             ({"variants": {"a": 2}, "filter": "flag:a = 1"}, ValueError, "circular"),
             ({"variants": {"a": 2}, "schedule": {"start": "2024-10-10 10:10:10", "end": "2024-10-10 20:20:20"}}, ValueError, "Timezone missing"),
@@ -485,8 +422,8 @@ class TestInvalidConfigs(unittest.TestCase):
 
         for case, expected_err, regex in cases:
             with self.subTest(case):
-                with self.assertRaisesRegex(expected_err, regex, msg=case):
-                    CompiledConfig.from_dict({**tpl_config, "rules": {"r1": case}})
+                with self.assertRaisesRegex(expected_err, regex, msg=f"case={case}"):
+                    CompiledConfig_from_dict({**tpl_config, "rules": {"r1": case}})
 
         circular_config = {
             "flags": {
@@ -512,4 +449,4 @@ class TestInvalidConfigs(unittest.TestCase):
         }
 
         with self.assertRaisesRegex(ValueError, "circular"):
-            CompiledConfig.from_dict(circular_config)
+            CompiledConfig_from_dict(circular_config)

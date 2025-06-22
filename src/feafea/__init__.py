@@ -369,11 +369,8 @@ class _CompiledFilter:
 
     # The compiled filter function.
     eval: Callable[[TargetID, Attributes], bool]
-    # The set of flag names referenced in the filter mapped to the inferred type
-    # of the flag. This is later used when compiling rules to ensure a flag has
-    # the same type as the inferred type from the filter. It's also used to ensure
-    # no circular references to feature flags occur.
-    flag_refs: dict[str, type]
+    # The set of flag names referenced in the filter.
+    flag_refs: set[str]
     # The set of rule names/splits referenced in the filter. This is used to ensure
     # no circular references to rules occur.
     rule_refs: set[tuple[str, str | None]]
@@ -389,7 +386,7 @@ class _FilterSet:
     and ensuring no circular references occur.
     """
 
-    __slots__ = ("_filters", "_sets")
+    __slots__ = ("_filters", "_sets", "_ignore_undefined_refs")
 
     _py_op_map = {
         "AND": "and",
@@ -406,9 +403,10 @@ class _FilterSet:
         "NOTIN": "not in",
     }
 
-    def __init__(self):
+    def __init__(self, ignore_undefined_refs: bool = False):
         self._filters: dict[str, _ParsedFilter] = {}
         self._sets: list[set] = []
+        self._ignore_undefined_refs = ignore_undefined_refs
 
     def _extract_set_literals(self, f):
         """
@@ -472,7 +470,7 @@ class _FilterSet:
         f: _ParsedFilter,
         seen: set[str],
         sets: list[set],
-        flag_refs: dict[str, type],
+        flag_refs: set[str],
         rule_refs: set[tuple[str, str | None]],
     ) -> _ParsedFilter:
         """
@@ -488,24 +486,15 @@ class _FilterSet:
             if f1[0] == "RULE":
                 rule_refs.add(f1[1])
             elif f1[0] == "FLAG":
-                # Infer the type of the flag based on the type of the literal
-                # it's being compared to.
-                if f0 in {"IN", "NOTIN"}:
-                    t = type(next(iter(self._sets[f2])))
-                else:
-                    t = type(f2)
-                name = f1[1]
-                existing_type = flag_refs.get(name)
-                # Ensure all usage of a flag in a filter agree on the inferred type.
-                if existing_type is not None and existing_type != t:
-                    raise ValueError(f"referenced feature flag {name} has conflicting inferred types {existing_type} and {t}")
-                flag_refs[name] = t
+                flag_refs.add(f1[1])
 
         if f0 == "EQ" and f1[0] == "FILTER":
             filter_name = f1[1]
             if filter_name in seen:
                 raise ValueError(f"circular reference in filter {filter_name}")
             if filter_name not in self._filters:
+                if self._ignore_undefined_refs:
+                    return ("BOOL", False, None)
                 raise ValueError(f"unknown filter {filter_name}")
             assert isinstance(filter_name, str)
             seen.add(filter_name)
@@ -528,23 +517,29 @@ class _FilterSet:
 
         return (f0, f1, f2)
 
-    def _pythonize(self, f: _ParsedFilter) -> str:
+    def _pythonize(self, f: _ParsedFilter, defined_flags: dict[str, CompiledFlag], defined_rules: dict[str, _CompiledRule]) -> str:
         """
         Convert the parse tree into a python expression.
 
         Enough type checks are done on attribute during runtime to ensure that
         the python expression never raises an exception.
+
+        Args:
+            f: The parsed filter
+            defined_flags: If provided, undefined flags will evaluate to False instead of raising errors
         """
         op, arg1, arg2 = f
         match op:
+            case "BOOL":
+                return repr(arg1)
             case "AND" | "OR":
                 # We know for certain that lhs and rhs are booleans. AND/ORing them
                 # together will always yield a boolean and will never raise an exception.
-                return f" {self._py_op_map[op]} ".join(f"({self._pythonize(a)})" for a in arg1)
+                return f" {self._py_op_map[op]} ".join(f"({self._pythonize(a, defined_flags, defined_rules)})" for a in arg1)
             case "NOT":
                 # We know for certain that the argument is a boolean. Negating it
                 # will always yield a boolean and will never raise an exception.
-                return f"(not ({self._pythonize(arg1)}))"
+                return f"(not ({self._pythonize(arg1, defined_flags, defined_rules)}))"
             case "EQ" | "NE" | "LE" | "GE" | "GT" | "LT" | "IN" | "NOTIN" | "INTERSECTS":
                 sym_type, sym_name, *sym_args = arg1
                 match sym_type:
@@ -575,6 +570,8 @@ class _FilterSet:
                         # Further stages of compilation ensure that the referenced flag here
                         # exists and has the same type as the inferred type from the filter.
                         # This will therefore never raise an exception.
+                        if self._ignore_undefined_refs and sym_name not in defined_flags:
+                            return "False"
                         lhs = f"flags[{sym_name!r}].eval(target_id, attributes).variant"
                         if op in {"IN", "NOTIN"}:
                             return f"{lhs} {self._py_op_map[op]} sets[{arg2!r}]"
@@ -608,6 +605,8 @@ class _FilterSet:
                         # Further stages of compilation ensure that the referenced rule here
                         # exists. This will therefore never raise an exception.
                         rule_name, split_name = sym_name
+                        if self._ignore_undefined_refs and rule_name not in defined_rules:
+                            return "False"
                         if split_name is not None:
                             return f"rules[{rule_name!r}].eval(target_id, attributes)[0] is True"
                         else:
@@ -628,11 +627,11 @@ class _FilterSet:
         """
         seen = set()
         sets: list[set] = []
-        flag_refs: dict[str, type] = {}
+        flag_refs: set[str] = set()
         rule_refs: set[tuple[str, str | None]] = set()
         inlined = self._inline(self._filters[name], seen, sets, flag_refs, rule_refs)
         optimized = self._optimize(inlined)
-        py_expr = self._pythonize(optimized)
+        py_expr = self._pythonize(optimized, flags, rules)
         code_str = f"""
 def a(target_id, attributes):
     return {py_expr}
@@ -783,9 +782,15 @@ class CompiledConfig:
         return dill.dumps(self)
 
     @staticmethod
-    def from_dict(c: DictConfig) -> CompiledConfig:
+    def from_dict(c: DictConfig, ignore_undefined_refs: bool = False) -> CompiledConfig:
         """
         Compile the config into a format that can be loaded into the evaluator.
+
+        Args:
+            c: The config dictionary to compile
+            ignore_undefined_refs: If True, references to undefined flags and rules
+                will be ignored instead of raising an error. This is useful for
+                development and testing purposes.
         """
         jsonschema.validate(c, _config_schema)
 
@@ -843,7 +848,7 @@ class CompiledConfig:
 
         # Parse all the named filters and validate usage of all flags and rules.
 
-        filters = _FilterSet()
+        filters = _FilterSet(ignore_undefined_refs=ignore_undefined_refs)
         for filter_name, f in c.get("filters", {}).items():
             filters.parse(filter_name, f)
 
@@ -859,6 +864,11 @@ class CompiledConfig:
 
             referenced_variants = set((flag, variant) for flag, variant in r.get("variants", {}).items())
             referenced_variants.update((flag, variant) for s in r.get("splits", []) for flag, variant in s.get("variants", {}).items())
+
+            if ignore_undefined_refs:
+                # Remove any referenced variants that are not defined in the config.
+                referenced_variants = {rv for rv in referenced_variants if rv[0] in flags}
+
             if referenced_variants - all_variants:
                 raise ValueError(f"unknown flag/variant in rule {rule_name}")
             if "splits" in r:
@@ -923,9 +933,10 @@ class CompiledConfig:
                         f"#FIRULE if split_target_percent >= {comulative_percentage_start!r} and split_target_percent < {comulative_percentage_end!r}: return (True, {split.get("name", "")!r})"
                     ]
                     for flag, variant in split.get("variants", {}).items():
-                        py_flag[flag].append(
-                            f"if split_target_percent >= {comulative_percentage_start!r} and split_target_percent < {comulative_percentage_end!r}: return ({variant!r}, {split.get("name", "")!r})"
-                        )
+                        if flag in py_flag:  # Only process flags that exist
+                            py_flag[flag].append(
+                                f"if split_target_percent >= {comulative_percentage_start!r} and split_target_percent < {comulative_percentage_end!r}: return ({variant!r}, {split.get("name", "")!r})"
+                            )
                     comulative_percentage_start += split["percentage"]
 
             # Compile the flag independent rule.
@@ -948,10 +959,13 @@ class CompiledConfig:
             # Compile the flag dependent rules.
 
             for flag, variant in r.get("variants", {}).items():
-                py_flag[flag].append(f"return {variant!r}")
+                if flag in py_flag:  # Only process flags that exist in py_flag dict
+                    py_flag[flag].append(f"return {variant!r}")
 
             for flag, py_lines in py_flag.items():
                 if not py_lines:
+                    if ignore_undefined_refs:
+                        continue  # Skip undefined flags instead of asserting
                     assert False, "unreachable"  # pragma: no cover
                 # Returns variant | (variant, split_name) | None
                 # - variant: The variant evaluated for non-split rule
@@ -967,7 +981,8 @@ class CompiledConfig:
                 reval = _CompiledFlagRule()
                 reval.rule_name = rule_name
                 reval.eval = _locals["a"]
-                flags[flag]._rules.append(reval)
+                if flag in flags:  # Only add rules for existing flags
+                    flags[flag]._rules.append(reval)
 
         # Check all referenced rules and flags in all filters that are reachable
         # from rules, are valid.
@@ -976,11 +991,11 @@ class CompiledConfig:
         unknown_rules = all_ref_rules - (
             set((crname, None) for crname, cr in compiled_rules.items() if not cr.split_names) | set((crname, sname) for crname, cr in compiled_rules.items() for sname in cr.split_names)
         )
-        if unknown_rules:
+        if not ignore_undefined_refs and unknown_rules:
             raise ValueError(f"unknown rules {unknown_rules} referenced")
         all_ref_flags = set(fname for r in compiled_rules.values() if hasattr(r, "_compiled_filter") for fname in r._compiled_filter.flag_refs)
         unknown_flags = all_ref_flags - set(flags)
-        if unknown_flags:
+        if not ignore_undefined_refs and unknown_flags:
             raise ValueError(f"unknown flags {unknown_flags} referenced")
 
         # Ensure inferred type of flag references match the actual flag type.
@@ -988,9 +1003,6 @@ class CompiledConfig:
         for r in compiled_rules.values():
             if not hasattr(r, "_compiled_filter"):
                 continue
-            for fname, ftype in r._compiled_filter.flag_refs.items():
-                if flags[fname].type != ftype:
-                    raise ValueError(f"referenced feature flag {fname} has inferred type {ftype} but actual type {flags[fname].type}")
 
         # Ensure no circular references to feature flags or rules from rule filters.
 
@@ -1004,18 +1016,22 @@ class CompiledConfig:
                 for r in entity._rules:
                     if r.rule_name in rule_refs:
                         raise ValueError(f"circular reference in flag {entity.name}")
-                    _check_circular_ref(compiled_rules[r.rule_name], (flag_refs, rule_refs))
+                    if r.rule_name in compiled_rules:
+                        _check_circular_ref(compiled_rules[r.rule_name], (flag_refs, rule_refs))
             elif isinstance(entity, _CompiledRule):
                 if hasattr(entity, "_compiled_filter"):
                     rule_refs = rule_refs | {entity.name}
                     for fname in entity._compiled_filter.flag_refs:
                         if fname in flag_refs:
                             raise ValueError(f"circular reference in rule {entity.name}")
-                        _check_circular_ref(flags[fname], (flag_refs, rule_refs))
+                        if fname in flags:
+                            # This handles where we have a reference to a flag that doesn't exist.
+                            _check_circular_ref(flags[fname], (flag_refs, rule_refs))
                     for rname, _ in entity._compiled_filter.rule_refs:
                         if rname in rule_refs:
                             raise ValueError(f"circular reference in rule {entity.name}")
-                        _check_circular_ref(compiled_rules[rname], (flag_refs, rule_refs))
+                        if rname in compiled_rules:
+                            _check_circular_ref(compiled_rules[rname], (flag_refs, rule_refs))
             else:  # pragma: no cover
                 assert False, "unreachable"  # pragma: no cover
 
