@@ -181,6 +181,11 @@ class TestValidConfig(unittest.TestCase):
                             "gg": 9,
                         },
                     },
+                    "r10": {
+                        "variants": {
+                            "nonexistent": "apply",
+                        }
+                    }
                 },
             },
         )

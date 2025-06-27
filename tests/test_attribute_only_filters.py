@@ -106,6 +106,8 @@ class TestAttributeOnlyFilters(unittest.TestCase):
             "flag:a = 3",
             "flag:a <= 'ABC'",
             "flag:a >= 9",
+            "flag:a in [1,9]",
+            "flag:a not in [1,9]",
         ]
         for filter in valid_syntax_cases:
             with self.subTest(filter):
@@ -118,6 +120,9 @@ class TestAttributeOnlyFilters(unittest.TestCase):
             ("attr:s = 'apple\"", ValueError, "unexpected character"),
             ("attr:s = 4e6", ValueError, "unexpected character"),
             ("attr:s in [1,'apple']", ValueError, "set values must all be of the same type"),
+            ("flag:d in [1,'2']", ValueError, "set values must all be of the same type"),
+            ("flag:d not in [1, '2']", ValueError, "set values must all be of the same type"),
+            ("flag:d not in [1, 2.2]", ValueError, "unexpected character"),
             ("attr:s not in [1,5.3]", ValueError, "unexpected character"),  # float in set
         ]
         for filter, err, regex in cases:

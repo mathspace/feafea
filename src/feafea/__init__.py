@@ -285,7 +285,7 @@ def _parse_filter(f: str) -> _ParsedFilter:
                             raise ValueError("insplit can only be compared to a boolean")
                         return (op, func_call, tokens.pop(0)[1])
                     return ("EQ", func_call, True)
-                case _:
+                case _: # pragma: no cover
                     assert False, "unreachable"  # pragma: no cover
 
         if tokens[0][0] in {"FILTER", "RULE"}:
@@ -964,8 +964,6 @@ class CompiledConfig:
 
             for flag, py_lines in py_flag.items():
                 if not py_lines:
-                    if ignore_undefined_refs:
-                        continue  # Skip undefined flags instead of asserting
                     assert False, "unreachable"  # pragma: no cover
                 # Returns variant | (variant, split_name) | None
                 # - variant: The variant evaluated for non-split rule
