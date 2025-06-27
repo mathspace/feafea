@@ -52,13 +52,7 @@ assert ev.evaluate(compiled_config, "enable_feature_X", "user_2", {"user_type": 
   variants: true and false. A flag can optionally have metadata which is a set
   of custom key-value pairs.
 - **Variant**: A possible value of a feature flag.
-- **Target**: A entity whose features are being evaluated. This is usually a
-  user but can be any entity. FeaFea doesn't enforce any constraints on the
-  target nor does it know about its existence. The only requirement is that a
-  target must have a unique identifier.
-- **Target ID**: A unique identifier of str type for a target that is used in
-  evaluation split rules (see below).
-- **Attributes**: A set of key-value pairs about the target. These are used in
+- **Attributes**: A set of key-value pairs. These are used in
   evaluation rules to determine the value of a feature flag. E.g. user type,
   country, etc.
 - **Filter**: A boolean expression. It is used to match against the attributes,
@@ -66,9 +60,6 @@ assert ev.evaluate(compiled_config, "enable_feature_X", "user_2", {"user_type": 
 - **Rule**: A rule is evaluated against a target to determine the variants of
   the feature flags. A rule is made up of an optional filter.
   The rule applies if all of its components match.
-- **Rule Split**: A list of percentages that determine how to split the targets
-  into different segments based on the target IDs. For each split, feature flag
-  variants can be assigned.
 - **Evaluation**: The process of determining the value of a feature flag for a
   target based on the attributes and rules. Result of an evaluation is a
   variant. Detailed information about an evaluation can be retrieved by calling
@@ -174,7 +165,52 @@ Here is a the same rule referencing a named filter:
 
 ### Syntax
 
-TODO
+Filters support a rich expression language with the following syntax:
+
+#### References
+- `attr:attribute_name` - References an attribute passed during evaluation
+- `filter:filter_name` - References a named filter defined in the configuration
+- `flag:flag_name` - References the current value of another feature flag
+
+#### Comparison Operators
+- `=` - Equality
+- `!=` - Inequality  
+- `<`, `<=`, `>`, `>=` - Numeric comparisons
+- `in` - Check if value is in a list
+- `not in` - Check if value is not in a list
+
+#### Logical Operators
+- `and` - Logical AND
+- `or` - Logical OR
+- `not` - Logical NOT (prefix operator)
+
+#### Literals
+- Strings: `'single quoted'` or `"double quoted"`
+- Numbers: `42`, `3.14`
+- Booleans: `true`, `false`
+- Lists: `['item1', 'item2', 3]`
+
+#### Functions
+- `insplit(attr:attribute, min_percent, max_percent)` - Returns true if the attribute value hashes to a percentage between min_percent and max_percent
+
+#### Examples
+```
+attr:user_type = 'premium'
+attr:age >= 18 and attr:country in ['US', 'CA']
+not attr:beta_user
+filter:premium_users or attr:admin = true
+insplit(attr:user_id, 0, 25)
+attr:user_id in ['user1', 'user2'] and flag:other_feature = true
+```
+
+#### Operator Precedence
+1. Function calls
+2. Comparisons (`=`, `!=`, `<`, etc.)
+3. `not`
+4. `and`
+5. `or`
+
+Use parentheses to override precedence: `(attr:a = 1 or attr:b = 2) and attr:c = 3`
 
 ## Rule
 
@@ -190,193 +226,80 @@ priority are evaluated in the lexical order of their names.
 
 ### Splits
 
-A rule can be defined to only apply to a subset of the targets, or to apply
-differently to different subsets. This is done by defining a split. Here's an
-example of a split:
+Splits allow you to roll out feature flags to a percentage of users in a consistent, deterministic way. This is useful for A/B testing, gradual rollouts, and canary deployments.
+
+#### Split Groups
+
+A split group is a named identifier that ensures consistent bucketing across multiple rules. Users are assigned to the same percentage bucket for all rules that use the same split group.
 
 ```json
 {
   "rules": {
-    "dashboard_style_experiment": {
-      "filter": "attr:user_type = 'beta'",
-      "splits": [
-        {
-          "name": "A",
-          "percentage": 50,
-          "variants": {
-            "dashboard_style": "dark"
-          }
-        },
-        {
-          "name": "B",
-          "percentage": 40,
-          "variants": {
-            "dashboard_style": "light"
-          }
-        }
-      ]
-    }
-  }
-}
-```
-
-In the above example, 50% of the beta users will get the dark dashboard style
-and 40% will get the light dashboard style. The remaining 10% will get the
-default dashboard style. The default dashboard style is defined in the flag
-definition. `name` is optional and comes in handy when the split is referenced
-in filters and for analytics purposes.
-
-The split is determined by the target ID. The target ID is hashed and the hash is
-used to determine the split. The same target ID will always get the same split
-variant. The split is deterministic and doesn't change unless the split
-definition changes - that is either the percentages or the order.
-
-Each rule splits its targets using the rule name as hash seed. This means that
-the same target ID can fall into different splits for different rules that
-define the same split percetages in the same order. Sometimes it's useful to
-have multiple rules split targets the same way. `split_group` can be defined at
-the rule level to override the hash seed. Following example demonstrates this:
-
-```json
-{
-  "rules": {
-    "dashboard_style_experiment": {
-      "filter": "attr:user_type = 'alpha'",
-      "splits": [
-        {
-          "percentage": 50,
-          "variants": {
-            "dashboard_style": "dark"
-          }
-        }
-      ]
+    "experiment_a_treatment": {
+      "filter": "insplit(attr:user_id, 0, 50)",
+      "split_group": "experiment_a",
+      "variants": {
+        "new_feature": true
+      }
     },
-    "another_experiment": {
-      "filter": "attr:user_type = 'beta'",
-      "split_group": "dashboard_style_experiment",
-      "splits": [
-        {
-          "percentage": 50
-        },
-        {
-          "percentage": 10,
-          "variants": {
-            "enable_black_and_white": true
-          }
-        }
-      ]
+    "experiment_a_control": {
+      "filter": "insplit(attr:user_id, 50, 100)",
+      "split_group": "experiment_a", 
+      "variants": {
+        "new_feature": false,
+        "analytics_variant": "control"
+      }
     }
   }
 }
 ```
 
-In the above example, the `another_experiment` rule will split the beta users
-the same way as the `dashboard_style_experiment` rule splits the alpha users.
-This makes it possible for the two rules to have no overlap of targets. This is
-accomplished by having the same `split_group` and the same split percentages in
-the same order. In `another_experiment`, we effectively skip over the first 50%
-of the targets (which are the alpha users).
+#### How It Works
 
-You may be tempted to use filters to exclude all the targets matched by another
-rule. As an example:
+1. The `insplit()` function takes an attribute and hashes it to produce a consistent value between 0-99
+2. The function returns `true` if the hash falls within the specified min/max percentage range
+3. The same attribute value will always get the same hash, ensuring consistent splits
+4. Seed of the hash is specified using the `split_group` field in the rule definition
 
+#### Use Cases
+
+**Gradual Rollout:**
 ```json
 {
   "rules": {
-    "dashboard_style_experiment": {
-      "filter": "attr:user_type = 'alpha'",
-      "splits": [
-        {
-          "percentage": 50,
-          "variants": {
-            "dashboard_style": "dark"
-          }
-        }
-      ]
-    },
-    "another_experiment": {
-      "filter": "attr:user_type = 'beta' and not rule:dashboard_style_experiment",
-      "splits": [
-        {
-          "percentage": 10,
-          "variants": {
-            "enable_black_and_white": true
-          }
-        }
-      ]
+    "gradual_rollout": {
+      "filter": "insplit(attr:user_id, 0, 25)",
+      "variants": {
+        "new_algorithm": true
+      }
     }
   }
 }
 ```
 
-This is NOT the same as the previous example. Here, we exclude 50% of the
-targets BEFORE we split the remaining into 10%. In other words, we end up
-targetting 10% of 50% which is 5% of the total targets.
-
-## Export
-
-TODO
-
-## Testing and Coverage
-
-This project requires **100% test coverage**. The CI pipeline will fail if coverage drops below 100%.
-
-### Running Tests Locally
-
-To run tests with coverage reporting:
-
-```bash
-# Install test dependencies
-pip install pytest pytest-cov coverage
-
-# Run tests with coverage
-python -m pytest tests/ --cov=src/feafea --cov-report=html --cov-report=term-missing
-
-# Generate coverage report
-coverage report --show-missing
+**A/B Testing:**
+```json
+{
+  "rules": {
+    "variant_a": {
+      "filter": "insplit(attr:user_id, 0, 33)",
+      "variants": {
+        "ui_style": "A"
+      }
+    },
+    "variant_b": {
+      "filter": "insplit(attr:user_id, 33, 66)",
+      "variants": {
+        "ui_style": "B"
+      }
+    }
+  }
+}
 ```
 
-### Coverage Requirements
+#### Best Practices
 
-- **Minimum Coverage**: 100%
-- **Branch Coverage**: Enabled
-- **Missing Lines**: Not allowed in CI
-
-### Coverage Report Generation
-
-Use the provided script to generate a detailed coverage report:
-
-```bash
-./scripts/generate_coverage_report.sh
-```
-
-This will:
-- Run all tests with coverage
-- Generate HTML and terminal reports
-- Create a markdown summary (`coverage_report.md`)
-- Open the HTML report showing exactly which lines need coverage
-
-### CI Integration
-
-The GitHub Actions CI workflow:
-- Runs tests with coverage measurement
-- Requires 100% coverage to pass
-- Posts detailed coverage reports as PR comments
-- Uploads HTML coverage reports as artifacts
-- Integrates with Codecov for coverage tracking
-
-### Configuration
-
-Coverage settings are defined in `.coveragerc`:
-- Source directory: `src/feafea`
-- Branch coverage enabled
-- Excludes test files and virtual environments
-- Coverage requirement (100%) is enforced in CI workflow, not in .coveragerc
-
-### Tips for Achieving 100% Coverage
-
-1. **View HTML Report**: Open `htmlcov/index.html` to see highlighted uncovered lines
-2. **Check Missing Lines**: Use `coverage report --show-missing` to see specific line numbers
-3. **Test Edge Cases**: Ensure all conditional branches are tested
-4. **Handle Exceptions**: Test error conditions and exception paths
-5. **Use Pragmas Sparingly**: Only exclude lines that genuinely can't be tested (already configured in `.coveragerc`)
+- Use descriptive split group names that indicate the experiment or rollout
+- Keep percentage splits consistent within the same split group
+- Consider using the `split_group` field in rule definitions for documentation
+- Remember that ranges are inclusive of min and exclusive of max (e.g., `insplit(attr:user_id, 0, 25)` includes 0-24)
