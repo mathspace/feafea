@@ -710,17 +710,6 @@ class CompiledFlag:
         return e
 
 
-def _unix_seconds_from_tz_time(s) -> float:
-    """
-    Parse the given ISO 8601 time string and return the number of seconds since
-    the unix epoch.
-    """
-    t = datetime.datetime.fromisoformat(s)
-    if t.tzinfo is None:
-        raise ValueError("Timezone missing")
-    return t.timestamp()
-
-
 def _seconds_from_human_duration(s) -> float:
     """
     Parse the given human readable duration string and return the number of
@@ -873,14 +862,6 @@ class CompiledConfig:
                 globals["match"] = cf.eval
                 py_common += [f"attributes['__seed'] = {r.get('split_group', rule_name)!r}"]
                 py_common += ["if not match(target_id, attributes): return None"]
-
-            if "schedule" in r:
-                start = _unix_seconds_from_tz_time(r["schedule"]["start"])
-                end = _unix_seconds_from_tz_time(r["schedule"]["end"])
-                if start >= end:
-                    raise ValueError("start must be before end")
-                py_common += [f"if attributes['__now'] < {start!r}: return None"]
-                py_common += [f"if attributes['__now'] >= {end!r}: return None"]
 
             # Compile the flag independent rule.
 
