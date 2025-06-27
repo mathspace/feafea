@@ -378,7 +378,7 @@ class _FilterSet:
     and ensuring no circular references occur.
     """
 
-    __slots__ = ("_filters", "_sets", "_ignore_undefined_refs")
+    __slots__ = ("_filters", "_sets")
 
     _py_op_map = {
         "AND": "and",
@@ -395,10 +395,9 @@ class _FilterSet:
         "NOTIN": "not in",
     }
 
-    def __init__(self, ignore_undefined_refs: bool = False):
+    def __init__(self):
         self._filters: dict[str, _ParsedFilter] = {}
         self._sets: list[set] = []
-        self._ignore_undefined_refs = ignore_undefined_refs
 
     def _extract_set_literals(self, f):
         """
@@ -485,9 +484,7 @@ class _FilterSet:
             if filter_name in seen:
                 raise ValueError(f"circular reference in filter {filter_name}")
             if filter_name not in self._filters:
-                if self._ignore_undefined_refs:
-                    return ("BOOL", False, None)
-                raise ValueError(f"unknown filter {filter_name}")
+                return ("BOOL", False, None)
             assert isinstance(filter_name, str)
             seen.add(filter_name)
             return self._inline(self._filters[filter_name], seen, sets, flag_refs, rule_refs)
@@ -562,7 +559,7 @@ class _FilterSet:
                         # Further stages of compilation ensure that the referenced flag here
                         # exists and has the same type as the inferred type from the filter.
                         # This will therefore never raise an exception.
-                        if self._ignore_undefined_refs and sym_name not in defined_flags:
+                        if sym_name not in defined_flags:
                             return "False"
                         lhs = f"flags[{sym_name!r}].eval(attributes).variant"
                         if op in {"IN", "NOTIN"}:
@@ -596,7 +593,7 @@ class _FilterSet:
                     case "RULE":
                         # Further stages of compilation ensure that the referenced rule here
                         # exists. This will therefore never raise an exception.
-                        if self._ignore_undefined_refs and sym_name not in defined_rules:
+                        if sym_name not in defined_rules:
                             return "False"
                         lhs = f"rules[{sym_name!r}].eval(attributes)"
                         return f"{lhs} {self._py_op_map[op]} {arg2!r}"
@@ -748,15 +745,12 @@ class CompiledConfig:
         return dill.dumps(self)
 
     @staticmethod
-    def from_dict(c: DictConfig, ignore_undefined_refs: bool = False) -> CompiledConfig:
+    def from_dict(c: DictConfig) -> CompiledConfig:
         """
         Compile the config into a format that can be loaded into the evaluator.
 
         Args:
             c: The config dictionary to compile
-            ignore_undefined_refs: If True, references to undefined flags and rules
-                will be ignored instead of raising an error. This is useful for
-                development and testing purposes.
         """
         jsonschema.validate(c, _config_schema)
 
@@ -814,7 +808,7 @@ class CompiledConfig:
 
         # Parse all the named filters and validate usage of all flags and rules.
 
-        filters = _FilterSet(ignore_undefined_refs=ignore_undefined_refs)
+        filters = _FilterSet()
         for filter_name, f in c.get("filters", {}).items():
             filters.parse(filter_name, f)
 
@@ -830,9 +824,8 @@ class CompiledConfig:
 
             referenced_variants = set((flag, variant) for flag, variant in r.get("variants", {}).items())
 
-            if ignore_undefined_refs:
-                # Remove any referenced variants that are not defined in the config.
-                referenced_variants = {rv for rv in referenced_variants if rv[0] in flags}
+            # Remove any referenced variants that are not defined in the config.
+            referenced_variants = {rv for rv in referenced_variants if rv[0] in flags}
 
             if referenced_variants - all_variants:
                 raise ValueError(f"unknown flag/variant in rule {rule_name}")
@@ -896,18 +889,6 @@ class CompiledConfig:
                 reval.rule_name = rule_name
                 reval.eval = _locals["a"]
                 flags[flag]._rules.append(reval)
-
-        # Check all referenced rules and flags in all filters that are reachable
-        # from rules, are valid.
-
-        all_ref_rules = set(rname for r in compiled_rules.values() if hasattr(r, "_compiled_filter") for rname in r._compiled_filter.rule_refs)
-        unknown_rules = all_ref_rules - set(compiled_rules)
-        if not ignore_undefined_refs and unknown_rules:
-            raise ValueError(f"unknown rules {unknown_rules} referenced")
-        all_ref_flags = set(fname for r in compiled_rules.values() if hasattr(r, "_compiled_filter") for fname in r._compiled_filter.flag_refs)
-        unknown_flags = all_ref_flags - set(flags)
-        if not ignore_undefined_refs and unknown_flags:
-            raise ValueError(f"unknown flags {unknown_flags} referenced")
 
         # Ensure inferred type of flag references match the actual flag type.
 

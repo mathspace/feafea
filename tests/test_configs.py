@@ -133,15 +133,21 @@ class TestValidConfig(unittest.TestCase):
                         "variants": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9],
                         "default": 0,
                     },
+                    "h": {
+                        "default": True,
+                    },
                     "gg": {
                         "alias": "g",
                     },
                 },
                 "filters": {
                     "f1": "attr:at1 in [5,6,7]",
-                    "f2": "flag:b = 1",
+                    "f2": "flag:b = 1 or flag:nonexistent = 55 or rule:nonexistent = true",
                     "f3": "filter:f1 and filter:f2 = true",
                     "f4": "rule:r1 != false",
+                    "f5": "flag:h in [1,2]",
+                    "f6": "flag:h not in [1,2]",
+                    "fbad": "filter:who and flag:what or rule:where or filter:f2",
                 },
                 "rules": {
                     "r0": {
@@ -186,17 +192,28 @@ class TestValidConfig(unittest.TestCase):
                             "c": "med",
                         },
                     },
+                    "r6": {
+                        "filter": "filter:f6",
+                        "variants": {
+                            "c": "med",
+                        },
+                    },
                     "r9": {
                         "variants": {
                             "gg": 9,
                         },
                     },
+                    "r10": {
+                        "variants": {
+                            "nonexistent": "apply",
+                        }
+                    }
                 },
-            }
+            },
         )
 
     def test_valid_config_high_level(self):
-        self.assertSetEqual(set(self._valid_config.flags), {"a", "b", "c", "cc", "d", "e", "f", "g", "gg"})
+        self.assertSetEqual(set(self._valid_config.flags), {"a", "b", "c", "cc", "d", "e", "f", "g", "h", "gg"})
         self.assertDictEqual(self._valid_config.flags["a"].metadata, {"category": "simple", "deprecated": False, "revision": 22})
         self.assertEqual(self._valid_config.flags["a"].name, "a")
         self.assertTrue(self._valid_config.flags["a"].type is bool)
@@ -271,7 +288,7 @@ class TestInvalidConfigs(unittest.TestCase):
                         "b": {"alias": "a"},
                         "c": {"alias": "b"},
                     },
-                }
+                },
             )
 
     def test_invalid_filter_def(self):
@@ -302,19 +319,16 @@ class TestInvalidConfigs(unittest.TestCase):
         cases = [
             ({}, ValidationError, "."),
             ({"variants": {"a": 4}}, ValueError, "unknown flag/variant"),  # non-existing variant
-            ({"variants": {"b": True}}, ValueError, "unknown flag/variant"),  # non-existing flag
             ({"split_group": 12}, ValidationError, "."),
             ({"variants": {"a": 4}, "split_group": 12}, ValidationError, "."),  # cannot combine split_group with variants
             ({"metadata": "abc"}, ValidationError, "."),
-            ({"variants": {"a": 2}, "filter": "flag:b = 4"}, ValueError, "unknown flag"),  # unknown flag in filter
-            ({"variants": {"a": 2}, "filter": "rule:unknown"}, ValueError, "unknown rule"),  # unknown rule in filter
             ({"variants": {"a": 2}, "filter": "rule:r1"}, ValueError, "circular"),
             ({"variants": {"a": 2}, "filter": "flag:a = 1"}, ValueError, "circular"),
         ]
 
         for case, expected_err, regex in cases:
             with self.subTest(case):
-                with self.assertRaisesRegex(expected_err, regex, msg=case):
+                with self.assertRaisesRegex(expected_err, regex, msg=f"case={case}"):
                     CompiledConfig.from_dict({**tpl_config, "rules": {"r1": case}})
 
         circular_config = {
@@ -343,25 +357,23 @@ class TestInvalidConfigs(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "circular"):
             CompiledConfig.from_dict(circular_config)
 
-    def test_additional_circular_reference_cases(self):
-        """Test additional circular reference detection scenarios."""
-        # Test complex circular reference between flags and rules
-        complex_circular_config = {
+    def test_undefined_refs_functionality(self):
+        """Test compilation with undefined references."""
+        config_dict = {
             "flags": {
-                "a": {"default": False},
-                "b": {"default": False}
+                "defined_flag": {"default": False}
             },
             "rules": {
-                "rule_1": {
-                    "filter": "flag:b = true",  # This creates circular ref
-                    "variants": {"a": True}
+                "rule_with_undefined_flag": {
+                    "filter": "flag:undefined_flag = true",
+                    "variants": {"defined_flag": True}
                 },
-                "rule_2": {
-                    "filter": "flag:a = true",  # This creates circular ref back
-                    "variants": {"b": True}
+                "rule_with_undefined_rule": {
+                    "filter": "rule:undefined_rule",
+                    "variants": {"defined_flag": True}
                 }
             }
         }
 
-        with self.assertRaisesRegex(ValueError, "circular reference"):
-            CompiledConfig.from_dict(complex_circular_config)
+        config = CompiledConfig.from_dict(config_dict)
+        self.assertIsNotNone(config)
