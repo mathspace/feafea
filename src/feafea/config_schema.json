@@ -127,12 +127,6 @@
                 },
                 "end": {
                   "type": "string"
-                },
-                "ramp_up": {
-                  "type": "string"
-                },
-                "ramp_down": {
-                  "type": "string"
                 }
               },
               "required": ["start", "end"]

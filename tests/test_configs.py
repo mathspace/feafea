@@ -258,42 +258,6 @@ class TestValidConfig(unittest.TestCase):
                 ev = cc.flags["a"].eval("", {"__now": ts})
                 self.assertEqual(ev.variant, expected)
 
-    def test_valid_schedule_ramp(self):
-        cc = CompiledConfig.from_dict(
-            {
-                "flags": {
-                    "ramp": {
-                        "variants": [1, 2],
-                        "default": 1,
-                    },
-                },
-                "rules": {
-                    "r1": {
-                        "variants": {"ramp": 2},
-                        "schedule": {
-                            "start": "2024-03-12 00:00:00Z",  # 1710201600
-                            "end": "2024-03-12 10:00:00Z",  # 1710237600
-                            "ramp_up": "1h",
-                            "ramp_down": "2h",
-                        },
-                    },
-                },
-            }
-        )
-
-        non_default_count = 0
-        for i in range(10000):
-            v = cc.flags["ramp"].eval(str(i), {"__now": 1710201600 + 360}).variant  # 6m after start (or 10% into 1 hour)
-            if v == 2:
-                non_default_count += 1
-        self.assertAlmostEqual(non_default_count / 10000, 0.1, delta=0.02)
-
-        non_default_count = 0
-        for i in range(10000):
-            v = cc.flags["ramp"].eval(str(i), {"__now": 1710237600 - 7200 + 720}).variant  # 12m after start of ramp down
-            if v == 2:
-                non_default_count += 1
-        self.assertAlmostEqual(non_default_count / 10000, 0.9, delta=0.02)
 
 
 class TestInvalidConfigs(unittest.TestCase):
@@ -370,11 +334,6 @@ class TestInvalidConfigs(unittest.TestCase):
             ({"variants": {"a": 2}, "schedule": {"start": "2024-10-10 10:10:10", "end": "2024-10-10 20:20:20"}}, ValueError, "Timezone missing"),
             ({"variants": {"a": 2}, "schedule": {"start": "2024-10-10 20:10:10Z", "end": "2024-10-10 10:20:20Z"}}, ValueError, "start must be before end"),
             ({"variants": {"a": 2}, "schedule": {"start": "2024-10-10 10:10:10Z", "end": "2024-10-10 10:10:10Z"}}, ValueError, "start must be before end"),
-            (
-                {"variants": {"a": 2}, "schedule": {"start": "2024-10-10 10:10:00Z", "end": "2024-10-10 10:20:00Z", "ramp_up": "8m", "ramp_down": "8m"}},
-                ValueError,
-                r"ramp_up \+ ramp_down must be less than end - start",
-            ),
         ]
 
         for case, expected_err, regex in cases:
