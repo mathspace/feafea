@@ -106,6 +106,8 @@ class TestAttributeOnlyFilters(unittest.TestCase):
             "flag:a = 3",
             "flag:a <= 'ABC'",
             "flag:a >= 9",
+            "flag:a in [1,9]",
+            "flag:a not in [1,9]",
         ]
         for filter in valid_syntax_cases:
             with self.subTest(filter):
@@ -118,6 +120,9 @@ class TestAttributeOnlyFilters(unittest.TestCase):
             ("attr:s = 'apple\"", ValueError, "unexpected character"),
             ("attr:s = 4e6", ValueError, "unexpected character"),
             ("attr:s in [1,'apple']", ValueError, "set values must all be of the same type"),
+            ("flag:d in [1,'2']", ValueError, "set values must all be of the same type"),
+            ("flag:d not in [1, '2']", ValueError, "set values must all be of the same type"),
+            ("flag:d not in [1, 2.2]", ValueError, "unexpected character"),
             ("attr:s not in [1,5.3]", ValueError, "unexpected character"),  # float in set
         ]
         for filter, err, regex in cases:
@@ -156,6 +161,13 @@ class TestAttributeOnlyFilters(unittest.TestCase):
             ("insplit(attr:a, -1, 2)", ValueError, r"expected positive numbers as second and third argument to insplit"),
             ("insplit(attr:a, 50, 40)", ValueError, r"expected second argument to insplit to be less than third argument"),
             ("insplit(attr:a, 1, 101)", ValueError, r"expected numbers less than or equal to 100 as second and third argument to insplit"),
+            ("insplit attr:a, 1, 2", ValueError, r"expected '\(' after function"),
+            ("insplit(and, 1, 2)", ValueError, r"expected single value as func arg instead of"),
+            ("insplit(attr:a and 1, 2)", ValueError, r"expected ',' or '\)' instead of"),
+            ("insplit(attr:a, 1, 2) != 123", ValueError, r"insplit can only be compared to a boolean"),
+            ("insplit(flag:a, 1, 2)", ValueError, r"expected attr:\* as first argument to insplit"),
+            ("insplit(attr:a, 'string', 2)", ValueError, r"expected INT/FLOAT as second and third argument to insplit"),
+            ("insplit(attr:a, true, 2)", ValueError, r"expected INT/FLOAT as second and third argument to insplit"),
         ]
         for filter, err, regex in cases:
             with self.subTest(filter):
@@ -163,6 +175,22 @@ class TestAttributeOnlyFilters(unittest.TestCase):
                 with self.assertRaisesRegex(err, regex):
                     fs.parse("f", filter)
                     fs.compile("f", {}, {})
+
+    def test_filter_rule_comparison_errors(self):
+        """Test error cases when comparing filter/rule to non-boolean values."""
+        cases = [
+            ("filter:some_filter = 'string'", ValueError, r"expected BOOL after 'EQ'"),
+            ("rule:some_rule != 123", ValueError, r"expected BOOL after 'NE'"),
+        ]
+
+        for filter_str, expected_err, regex in cases:
+            with self.subTest(filter_str):
+                fs = _FilterSet()
+                # First define the referenced filter/rule
+                fs.parse("some_filter", "attr:test = 1")
+
+                with self.assertRaisesRegex(expected_err, regex):
+                    fs.parse("f", filter_str)
 
     def test_invalid_attributes(self):
         cases = [

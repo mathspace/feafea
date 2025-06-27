@@ -6,3 +6,5 @@ coverage.*
 .coverage
 example
 htmlcov
+coverage_report.md
+.pytest_cache

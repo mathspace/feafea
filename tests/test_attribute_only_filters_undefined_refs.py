@@ -328,3 +328,38 @@ class TestAttributeOnlyFilters(unittest.TestCase):
 
         self.assertAlmostEqual(true_count / 100000, 0.5, delta=0.002)
         self.assertAlmostEqual(false_count / 100000, 0.5, delta=0.002)
+
+    def test_undefined_flag_reference_in_pythonize(self):
+        """Test that undefined flag references return False when ignore_undefined_refs is True."""
+        # This test specifically targets line 577 in _pythonize method
+        cases = [
+            ("flag:undefined_flag = true", {}, False),
+            ("flag:undefined_flag != false", {}, False),
+            ("flag:undefined_flag in [1, 2, 3]", {}, False),
+            ("flag:undefined_flag not in [4, 5, 6]", {}, False),
+            ("flag:undefined_flag > 5", {}, False),
+            ("flag:undefined_flag < 10", {}, False),
+        ]
+
+        for filter_str, attr, expected in cases:
+            with self.subTest(f"'{filter_str}', '{attr}'"):
+                fs = _FilterSet()
+                fs.parse("f", filter_str)
+                c = fs.compile("f", {}, {})  # Empty flags dict means undefined
+                self.assertEqual(c.eval("", attr), expected)
+
+    def test_undefined_rule_reference_in_pythonize(self):
+        """Test that undefined rule references return False when ignore_undefined_refs is True."""
+        # This should also trigger similar logic in _pythonize for rules
+        cases = [
+            ("rule:undefined_rule", {}, False),
+            ("rule:undefined_rule = true", {}, False),
+            ("rule:undefined_rule != false", {}, False),
+        ]
+
+        for filter_str, attr, expected in cases:
+            with self.subTest(f"'{filter_str}', '{attr}'"):
+                fs = _FilterSet()
+                fs.parse("f", filter_str)
+                c = fs.compile("f", {}, {})  # Empty rules dict means undefined
+                self.assertEqual(c.eval("", attr), expected)
