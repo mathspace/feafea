@@ -186,55 +186,6 @@ class TestValidConfig(unittest.TestCase):
                             "c": "med",
                         },
                     },
-                    "r6": {
-                        "splits": [
-                            {
-                                "name": "A",
-                                "percentage": 10,
-                                "variants": {
-                                    "d": "red",
-                                },
-                            },
-                            {
-                                "name": "B",
-                                "percentage": 5,  # [10-15)
-                                "variants": {
-                                    "d": "orange",
-                                },
-                            },
-                        ],
-                    },
-                    "r7": {
-                        "split_group": "r6",
-                        "splits": [
-                            {
-                                "name": "AB",
-                                "percentage": 15,
-                                "variants": {
-                                    "e": "fast",
-                                },
-                            },
-                        ],
-                    },
-                    "r8": {
-                        "filter": "rule:r6/B",
-                        "splits": [
-                            {
-                                "name": "B_1",
-                                "percentage": 50,
-                                "variants": {
-                                    "f": "up",
-                                },
-                            },
-                            {
-                                "name": "B_2",
-                                "percentage": 50,
-                                "variants": {
-                                    "f": "down",
-                                },
-                            },
-                        ],
-                    },
                     "r9": {
                         "variants": {
                             "gg": 9,
@@ -286,56 +237,6 @@ class TestValidConfig(unittest.TestCase):
                 self.assertEqual(ev.variant, variant)
                 self.assertEqual(ev.reason, reason)
                 self.assertEqual(ev.rule, rule)
-
-    def test_valid_split_config(self):
-        # id values in the cases below are picked by running them through the
-        # feafea._hash_percent() function finding out their percentage bucket.
-        cases = [
-            # flag, id, attrs, reason, rule, variant
-            ("d", "16", {}, "default", "", "white"),  # 88%
-            ("d", "22", {}, "default", "", "white"),  # 46%
-            ("d", "18", {}, "default", "", "white"),  # 86%
-            ("d", "20", {}, "split_rule", "r6/A", "red"),  # 9.4%
-            ("d", "59", {}, "split_rule", "r6/A", "red"),  # 4%
-            ("d", "15", {}, "split_rule", "r6/B", "orange"),  # 13%
-            ("e", "23", {}, "default", "", "idle"),  # 67%
-            ("e", "8", {}, "split_rule", "r7/AB", "fast"),  # 7.6%
-            ("f", "13", {}, "default", "", "middle"),  # r6=98%, r8=40%
-            ("f", "15", {}, "split_rule", "r8/B_1", "up"),  # r6=13%, r8=31%
-        ]
-
-        for flag, id, attrs, reason, rule, variant in cases:
-            with self.subTest(f"flag={flag}, id={id}, attrs={attrs}"):
-                ev = self._valid_config.flags[flag].eval(id, attrs)
-                if rule:
-                    rule_name, rule_split = rule.split("/")
-                    self.assertEqual((ev.reason, ev.rule, ev.split, ev.variant), (reason, rule_name, rule_split, variant))
-                else:
-                    self.assertEqual((ev.reason, ev.rule, ev.variant), (reason, rule, variant))
-
-    def test_valid_split_probability(self):
-        config = {
-            "flags": {
-                "a": {"variants": [1, 2, 3], "default": 1},
-            },
-            "rules": {
-                "r1": {
-                    "splits": [
-                        {"percentage": 10, "variants": {"a": 2}},
-                        {"percentage": 60, "variants": {"a": 3}},
-                    ],
-                },
-            },
-        }
-        variant_count = {1: 0, 2: 0, 3: 0}
-        cc = CompiledConfig.from_dict(config)
-        for id in range(100000):
-            v = cc.flags["a"].eval(str(id), {}).variant
-            assert isinstance(v, int)
-            variant_count[v] += 1
-        self.assertAlmostEqual(variant_count[2] / 100000, 0.1, delta=0.002)
-        self.assertAlmostEqual(variant_count[3] / 100000, 0.6, delta=0.002)
-        self.assertAlmostEqual(variant_count[1] / 100000, 0.3, delta=0.002)
 
     def test_valid_schedule(self):
         cases = [
@@ -458,14 +359,7 @@ class TestInvalidConfigs(unittest.TestCase):
         cases = [
             ({}, ValidationError, "."),
             ({"variants": {"a": 4}}, ValueError, "unknown flag/variant"),  # non-existing variant
-            ({"splits": [{"percentage": 10, "variants": {"a": 4}}]}, ValueError, "unknown flag/variant"),  # non-existing variant
             ({"variants": {"b": True}}, ValueError, "unknown flag/variant"),  # non-existing flag
-            ({"splits": [{"percentage": 10, "variants": {"b": True}}]}, ValueError, "unknown flag/variant"),  # non-existing flag
-            ({"variants": {"a": 1}, "splits": [{"percentage": 10}]}, ValidationError, "."),  # both splits and const
-            ({"splits": [{"percentage": 20}, {"percentage": 90}]}, ValueError, "must sum to 100 or less"),  # >100 percentage
-            ({"splits": [{"percentage": -10}]}, ValidationError, "minimum"),  # <=0 percentage
-            ({"splits": [{"percentage": 0}]}, ValidationError, "minimum"),  # <=0 percentage
-            ({"splits": [{"percentage": 100}]}, ValidationError, "maximum"),  # <100 percentage (=100 is same as not using splits)
             ({"split_group": 12}, ValidationError, "."),
             ({"variants": {"a": 4}, "split_group": 12}, ValidationError, "."),  # cannot combine split_group with variants
             ({"metadata": "abc"}, ValidationError, "."),

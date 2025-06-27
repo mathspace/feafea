@@ -116,8 +116,7 @@ _filter_token_re = re.compile(
             ("ATTR", r"attr:[a-zA-Z][a-zA-Z0-9_]*"),
             ("FLAG", r"flag:[a-zA-Z_][a-zA-Z0-9_]*"),
             ("FILTER", r"filter:[a-zA-Z_][a-zA-Z0-9_]*"),
-            # Format of Rule reference: rule-name/optional-split-name
-            ("RULE", r"rule:[a-zA-Z_][a-zA-Z0-9_]*(?:/[a-zA-Z][a-zA-Z0-9_]*)?"),
+            ("RULE", r"rule:[a-zA-Z_][a-zA-Z0-9_]*"),
             # Functions
             ("FUNC", r"insplit\b"),
             # Whitespace
@@ -179,13 +178,7 @@ def _parse_filter(f: str) -> _ParsedFilter:
                         # This eval is safe because it's matched by a regex that
                         # does not allow arbitrary code.
                         value = set(eval(value))
-                    case "RULE":
-                        value = value.split(":", 1)[1]
-                        if "/" in value:
-                            value = tuple(value.split("/", 1))
-                        else:
-                            value = (value, None)
-                    case "ATTR" | "FLAG" | "FILTER":
+                    case "ATTR" | "FLAG" | "FILTER" | "RULE":
                         value = value.split(":", 1)[1]
                     case _:
                         pass
@@ -371,9 +364,8 @@ class _CompiledFilter:
     eval: Callable[[TargetID, Attributes], bool]
     # The set of flag names referenced in the filter.
     flag_refs: set[str]
-    # The set of rule names/splits referenced in the filter. This is used to ensure
-    # no circular references to rules occur.
-    rule_refs: set[tuple[str, str | None]]
+    # The set of rule names referenced in the filter.
+    rule_refs: set[str]
 
     # Filter references are not needed since filter references in a filter are
     # inlined during compilation and any circular references checked.
@@ -471,7 +463,7 @@ class _FilterSet:
         seen: set[str],
         sets: list[set],
         flag_refs: set[str],
-        rule_refs: set[tuple[str, str | None]],
+        rule_refs: set[str],
     ) -> _ParsedFilter:
         """
         Inline filter references. This is an optimiztion step to avoid function
@@ -604,13 +596,10 @@ class _FilterSet:
                     case "RULE":
                         # Further stages of compilation ensure that the referenced rule here
                         # exists. This will therefore never raise an exception.
-                        rule_name, split_name = sym_name
-                        if self._ignore_undefined_refs and rule_name not in defined_rules:
+                        if self._ignore_undefined_refs and sym_name not in defined_rules:
                             return "False"
-                        if split_name is not None:
-                            return f"rules[{rule_name!r}].eval(target_id, attributes)[0] is True"
-                        else:
-                            return f"rules[{rule_name!r}].eval(target_id, attributes) == (True, {split_name!r})"
+                        lhs = f"rules[{sym_name!r}].eval(target_id, attributes)"
+                        return f"{lhs} {self._py_op_map[op]} {arg2!r}"
                     case _:  # pragma: no cover
                         assert False, "unreachable"  # pragma: no cover
             case "CONTAIN" | "NOTCONTAIN":
@@ -628,7 +617,7 @@ class _FilterSet:
         seen = set()
         sets: list[set] = []
         flag_refs: set[str] = set()
-        rule_refs: set[tuple[str, str | None]] = set()
+        rule_refs: set[str] = set()
         inlined = self._inline(self._filters[name], seen, sets, flag_refs, rule_refs)
         optimized = self._optimize(inlined)
         py_expr = self._pythonize(optimized, flags, rules)
@@ -662,27 +651,24 @@ type TargetID = str
 class _CompiledRule:
     """
     Flag independent compiled rule that evaluates to a boolean indicating
-    whether the rule matched. It also returns split name if the rule is a split
-    rule. If the rule does not apply, it returns (False, None).
+    whether the rule matched. If the rule does not apply, it returns False.
     """
 
-    __slots__ = ("name", "eval", "split_names", "_compiled_filter")
+    __slots__ = ("name", "eval", "_compiled_filter")
     name: str
-    eval: Callable[[TargetID, Attributes], tuple[bool, str | None]]
-    split_names: set[str]
+    eval: Callable[[TargetID, Attributes], bool]
     _compiled_filter: _CompiledFilter
 
 
 class _CompiledFlagRule:
     """
-    Flag specific compiled rule that evaluates to a variant or a tuple of
-    variant and split name if the rule is a split rule. If the rule does not
-    apply, it returns None.
+    Flag specific compiled rule that evaluates to a variant.
+    If the rule does not apply, it returns None.
     """
 
     __slots__ = ("rule_name", "eval")
     rule_name: str
-    eval: Callable[[TargetID, Attributes], Variant | tuple[Variant, str] | None]
+    eval: Callable[[TargetID, Attributes], Variant | None]
 
 
 class CompiledFlag:
@@ -710,17 +696,12 @@ class CompiledFlag:
         e.default = self.default
         e.flag = self.name
         e.target_id = target_id
-        e.split = ""
         for rule in self._rules:
             v = rule.eval(target_id, attributes)
             if v is not None:
                 e.rule = rule.rule_name
-                if isinstance(v, tuple):
-                    e.variant, e.split = v
-                    e.reason = "split_rule"
-                else:
-                    e.variant = v
-                    e.reason = "const_rule"
+                e.variant = v
+                e.reason = "const_rule"
                 break
         else:
             e.rule = ""
@@ -863,7 +844,6 @@ class CompiledConfig:
             # Rule validations
 
             referenced_variants = set((flag, variant) for flag, variant in r.get("variants", {}).items())
-            referenced_variants.update((flag, variant) for s in r.get("splits", []) for flag, variant in s.get("variants", {}).items())
 
             if ignore_undefined_refs:
                 # Remove any referenced variants that are not defined in the config.
@@ -871,10 +851,6 @@ class CompiledConfig:
 
             if referenced_variants - all_variants:
                 raise ValueError(f"unknown flag/variant in rule {rule_name}")
-            if "splits" in r:
-                percentage_sum = sum(v["percentage"] for v in r["splits"])
-                if percentage_sum == 0 or percentage_sum > 100:
-                    raise ValueError("split percentages must sum to 100 or less")
 
             # Rule compilation.
 
@@ -920,35 +896,13 @@ class CompiledConfig:
                     py_common += [f"ramp_down_percent = 100 * ({end!r} - attributes['__now']) / {ramp_down!r}"]
                     py_common += ["if schedule_target_percent >= ramp_down_percent: return None"]
 
-            compiled_rule.split_names = set()
-            if "splits" in r:
-                compiled_rule.split_names.update(s["name"] for s in r["splits"] if "name" in s)
-                split_seed = r.get("split_group", rule_name)
-                py_common += [f"split_target_percent = _hash_percent(target_id, seed={split_seed!r})"]
-                comulative_percentage_start = 0
-                comulative_percentage_end = 0
-                for split in r["splits"]:
-                    comulative_percentage_end += split["percentage"]
-                    py_common += [
-                        f"#FIRULE if split_target_percent >= {comulative_percentage_start!r} and split_target_percent < {comulative_percentage_end!r}: return (True, {split.get("name", "")!r})"
-                    ]
-                    for flag, variant in split.get("variants", {}).items():
-                        if flag in py_flag:  # Only process flags that exist
-                            py_flag[flag].append(
-                                f"if split_target_percent >= {comulative_percentage_start!r} and split_target_percent < {comulative_percentage_end!r}: return ({variant!r}, {split.get("name", "")!r})"
-                            )
-                    comulative_percentage_start += split["percentage"]
-
             # Compile the flag independent rule.
 
             lines = ["def a(target_id, attributes):"]
             for line in py_common:
-                line = re.sub(r"return None$", "return (False, None)", line)
-                line = re.sub(r"^#FIRULE ", "", line)
+                line = re.sub(r"return None$", "return False", line)
                 lines.append(f"  {line}")
-            if "splits" not in r:
-                lines.append("  return (True, None)")
-            lines.append("  return (False, None)")
+            lines.append("  return True")
             code = compile("\n".join(lines), "", "exec")
             _locals = {}
             exec(code, globals, _locals)
@@ -965,9 +919,8 @@ class CompiledConfig:
             for flag, py_lines in py_flag.items():
                 if not py_lines:
                     assert False, "unreachable"  # pragma: no cover
-                # Returns variant | (variant, split_name) | None
-                # - variant: The variant evaluated for non-split rule
-                # - (variant, split_name): The variant evaluated for split rule
+                # Returns variant | None
+                # - variant: The variant evaluated
                 # - None: The rule does not apply
                 lines = ["def a(target_id, attributes):"]
                 lines += list(f"  {line}" for line in (py_common + py_lines))
@@ -985,9 +938,7 @@ class CompiledConfig:
         # from rules, are valid.
 
         all_ref_rules = set(rname for r in compiled_rules.values() if hasattr(r, "_compiled_filter") for rname in r._compiled_filter.rule_refs)
-        unknown_rules = all_ref_rules - (
-            set((crname, None) for crname, cr in compiled_rules.items() if not cr.split_names) | set((crname, sname) for crname, cr in compiled_rules.items() for sname in cr.split_names)
-        )
+        unknown_rules = all_ref_rules - set(compiled_rules)
         if not ignore_undefined_refs and unknown_rules:
             raise ValueError(f"unknown rules {unknown_rules} referenced")
         all_ref_flags = set(fname for r in compiled_rules.values() if hasattr(r, "_compiled_filter") for fname in r._compiled_filter.flag_refs)
@@ -1023,7 +974,7 @@ class CompiledConfig:
                         if fname in flags:
                             # This handles where we have a reference to a flag that doesn't exist.
                             _check_circular_ref(flags[fname], (flag_refs, rule_refs))
-                    for rname, _ in entity._compiled_filter.rule_refs:
+                    for rname in entity._compiled_filter.rule_refs:
                         if rname in rule_refs:
                             raise ValueError(f"circular reference in rule {entity.name}")
                         if rname in compiled_rules:
@@ -1057,7 +1008,6 @@ class FlagEvaluation:
         "target_id",
         "rule",
         "reason",
-        "split",
         "timestamp",
     )
     flag: str
@@ -1065,12 +1015,11 @@ class FlagEvaluation:
     default: Variant
     target_id: str
     rule: str | Literal[""]
-    reason: Literal["split_rule", "const_rule", "default"]
-    split: str | Literal[""]
+    reason: Literal["const_rule", "default"]
     timestamp: float
 
 
-_prom_labels = ["flag", "variant", "default", "rule", "reason", "split"]
+_prom_labels = ["flag", "variant", "default", "rule", "reason"]
 _prom_eval_duration = Histogram(
     "feafea_evaluation_duration_seconds",
     "Flag evaluation duration in seconds",
@@ -1123,7 +1072,6 @@ class Evaluator:
             "default": str(e.default),
             "rule": e.rule,
             "reason": e.reason,
-            "split": e.split,
         }
         _prom_eval_duration.labels(**labels).observe(dur)
 

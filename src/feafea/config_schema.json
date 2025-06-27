@@ -36,11 +36,7 @@
                   ]
                 },
                 "default": {
-                  "type": [
-                    "string",
-                    "integer",
-                    "boolean"
-                  ]
+                  "type": ["string", "integer", "boolean"]
                 },
                 "metadata": {
                   "type": "object",
@@ -53,25 +49,16 @@
               "if": {
                 "properties": {
                   "default": {
-                    "type": [
-                      "boolean"
-                    ]
+                    "type": ["boolean"]
                   }
                 },
-                "required": [
-                  "default"
-                ]
+                "required": ["default"]
               },
               "then": {
-                "required": [
-                  "default"
-                ]
+                "required": ["default"]
               },
               "else": {
-                "required": [
-                  "variants",
-                  "default"
-                ]
+                "required": ["variants", "default"]
               }
             },
             {
@@ -82,9 +69,7 @@
                   "type": "string"
                 }
               },
-              "required": [
-                "alias"
-              ]
+              "required": ["alias"]
             }
           ]
         }
@@ -107,18 +92,7 @@
         "^[a-zA-Z_][a-zA-Z0-9_]*$": {
           "type": "object",
           "additionalProperties": false,
-          "oneOf": [
-            {
-              "required": [
-                "variants"
-              ]
-            },
-            {
-              "required": [
-                "splits"
-              ]
-            }
-          ],
+          "required": ["variants"],
           "properties": {
             "enabled": {
               "type": "boolean"
@@ -132,45 +106,8 @@
               "minProperties": 1,
               "patternProperties": {
                 "^[a-zA-Z_][a-zA-Z0-9_]*$": {
-                  "type": [
-                    "string",
-                    "integer",
-                    "boolean"
-                  ]
+                  "type": ["string", "integer", "boolean"]
                 }
-              }
-            },
-            "splits": {
-              "type": "array",
-              "minItems": 1,
-              "items": {
-                "type": "object",
-                "additionalProperties": false,
-                "properties": {
-                  "name": {
-                    "type": "string",
-                    "pattern": "^[a-zA-Z_][a-zA-Z0-9_]*$"
-                  },
-                  "percentage": {
-                    "type": "number",
-                    "exclusiveMinimum": 0,
-                    "exclusiveMaximum": 100
-                  },
-                  "variants": {
-                    "type": "object",
-                    "minProperties": 1,
-                    "additionalProperties": {
-                      "type": [
-                        "string",
-                        "integer",
-                        "boolean"
-                      ]
-                    }
-                  }
-                },
-                "required": [
-                  "percentage"
-                ]
               }
             },
             "split_group": {
@@ -198,10 +135,7 @@
                   "type": "string"
                 }
               },
-              "required": [
-                "start",
-                "end"
-              ]
+              "required": ["start", "end"]
             },
             "metadata": {
               "type": "object",
