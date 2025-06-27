@@ -375,7 +375,7 @@ Coverage settings are defined in `.coveragerc`:
 - Source directory: `src/feafea`
 - Branch coverage enabled
 - Excludes test files and virtual environments
-- Fails under 100% coverage
+- Coverage requirement (100%) is enforced in CI workflow, not in .coveragerc
 
 ### Tips for Achieving 100% Coverage
 
