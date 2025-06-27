@@ -65,14 +65,16 @@ echo "📊 Coverage Summary:"
 coverage report
 
 echo ""
-if python3 -c "import sys; sys.exit(0 if float('$COVERAGE') >= 100 else 1)"; then
-    echo "✅ Coverage requirement met: ${COVERAGE}% 🎉"
-    exit 0
+
+# Check coverage requirement (same as CI)
+if coverage report --fail-under=100 >/dev/null 2>&1; then
+echo "✅ Coverage requirement met: ${COVERAGE}% 🎉"
+exit 0
 else
-    echo "❌ Coverage requirement not met: ${COVERAGE}% (required: 100%)"
-    echo ""
-    echo "💡 To see detailed coverage:"
-    echo "   - Open htmlcov/index.html in your browser"
-    echo "   - Or run: coverage report --show-missing"
-    exit 1
+echo "❌ Coverage requirement not met: ${COVERAGE}% (required: 100%)"
+echo ""
+echo "💡 To see detailed coverage:"
+echo "   - Open htmlcov/index.html in your browser"
+echo "   - Or run: coverage report --show-missing"
+exit 1
 fi

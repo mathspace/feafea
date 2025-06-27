@@ -10,8 +10,7 @@ omit =
     */site-packages/*
 
 [report]
-# Require 100% coverage
-fail_under = 100
+# Coverage requirement is enforced in CI workflow
 precision = 2
 show_missing = True
 skip_covered = False
