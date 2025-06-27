@@ -979,8 +979,7 @@ class CompiledConfig:
                 reval = _CompiledFlagRule()
                 reval.rule_name = rule_name
                 reval.eval = _locals["a"]
-                if flag in flags:  # Only add rules for existing flags
-                    flags[flag]._rules.append(reval)
+                flags[flag]._rules.append(reval)
 
         # Check all referenced rules and flags in all filters that are reachable
         # from rules, are valid.
@@ -1014,8 +1013,7 @@ class CompiledConfig:
                 for r in entity._rules:
                     if r.rule_name in rule_refs:
                         raise ValueError(f"circular reference in flag {entity.name}")
-                    if r.rule_name in compiled_rules:
-                        _check_circular_ref(compiled_rules[r.rule_name], (flag_refs, rule_refs))
+                    _check_circular_ref(compiled_rules[r.rule_name], (flag_refs, rule_refs))
             elif isinstance(entity, _CompiledRule):
                 if hasattr(entity, "_compiled_filter"):
                     rule_refs = rule_refs | {entity.name}
