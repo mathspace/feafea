@@ -297,11 +297,11 @@ class TestAttributeOnlyFilters(unittest.TestCase):
 
     def test_rule_and_flag_refs(self):
         fs = _FilterSet()
-        fs.parse("a", "rule:abc and rule:ghi/A or flag:xyz = '88'")
+        fs.parse("a", "rule:abc and rule:ghi or flag:xyz = '88'")
         fs.parse("b", "filter:a and rule:def or flag:uwu or flag:xyz != 'abc'")
         c = fs.compile("b", {}, {})
         self.assertSetEqual(c.flag_refs, {"xyz", "uwu"})
-        self.assertSetEqual(c.rule_refs, {("abc", None), ("def", None), ("ghi", "A")})
+        self.assertSetEqual(c.rule_refs, {"abc", "def", "ghi"})
 
     def test_insplit_function_distribution_and_exclusivity(self):
         fs = _FilterSet()
