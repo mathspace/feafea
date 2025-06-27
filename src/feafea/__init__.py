@@ -879,22 +879,8 @@ class CompiledConfig:
                 end = _unix_seconds_from_tz_time(r["schedule"]["end"])
                 if start >= end:
                     raise ValueError("start must be before end")
-                ramp_up = _seconds_from_human_duration(r["schedule"].get("ramp_up", "0m"))
-                ramp_down = _seconds_from_human_duration(r["schedule"].get("ramp_down", "0m"))
-                if ramp_up + ramp_down > end - start:
-                    raise ValueError("ramp_up + ramp_down must be less than end - start")
                 py_common += [f"if attributes['__now'] < {start!r}: return None"]
                 py_common += [f"if attributes['__now'] >= {end!r}: return None"]
-
-                if ramp_up > 0 or ramp_down > 0:
-                    schedule_seed = rule_name + "\0schedule"
-                    py_common = [f"schedule_target_percent = _hash_percent(target_id, seed={schedule_seed!r})"]
-                if ramp_up > 0:
-                    py_common += [f"ramp_up_percent = 100 * (attributes['__now'] - {start!r}) / {ramp_up!r}"]
-                    py_common += ["if schedule_target_percent >= ramp_up_percent: return None"]
-                if ramp_down > 0:
-                    py_common += [f"ramp_down_percent = 100 * ({end!r} - attributes['__now']) / {ramp_down!r}"]
-                    py_common += ["if schedule_target_percent >= ramp_down_percent: return None"]
 
             # Compile the flag independent rule.
 
