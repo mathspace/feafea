@@ -450,3 +450,29 @@ class TestInvalidConfigs(unittest.TestCase):
 
         with self.assertRaisesRegex(ValueError, "circular"):
             CompiledConfig_from_dict(circular_config)
+
+    def test_ignore_undefined_refs_functionality(self):
+        """Test that ignore_undefined_refs=True allows compilation with undefined references."""
+        config_dict = {
+            "flags": {
+                "defined_flag": {"default": False}
+            },
+            "rules": {
+                "rule_with_undefined_flag": {
+                    "filter": "flag:undefined_flag = true",
+                    "variants": {"defined_flag": True}
+                },
+                "rule_with_undefined_rule": {
+                    "filter": "rule:undefined_rule",
+                    "variants": {"defined_flag": True}
+                }
+            }
+        }
+
+        # Should compile successfully with ignore_undefined_refs=True
+        config = CompiledConfig_from_dict(config_dict, ignore_undefined_refs=True)
+        self.assertIsNotNone(config)
+
+        # Should fail with ignore_undefined_refs=False (default)
+        with self.assertRaisesRegex(ValueError, "unknown"):
+            CompiledConfig.from_dict(config_dict, ignore_undefined_refs=False)

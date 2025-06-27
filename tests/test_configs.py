@@ -513,3 +513,26 @@ class TestInvalidConfigs(unittest.TestCase):
 
         with self.assertRaisesRegex(ValueError, "circular"):
             CompiledConfig.from_dict(circular_config)
+
+    def test_additional_circular_reference_cases(self):
+        """Test additional circular reference detection scenarios."""
+        # Test complex circular reference between flags and rules
+        complex_circular_config = {
+            "flags": {
+                "a": {"default": False},
+                "b": {"default": False}
+            },
+            "rules": {
+                "rule_1": {
+                    "filter": "flag:b = true",  # This creates circular ref
+                    "variants": {"a": True}
+                },
+                "rule_2": {
+                    "filter": "flag:a = true",  # This creates circular ref back
+                    "variants": {"b": True}
+                }
+            }
+        }
+
+        with self.assertRaisesRegex(ValueError, "circular reference"):
+            CompiledConfig.from_dict(complex_circular_config)

@@ -71,6 +71,32 @@ class TestEvaluator(unittest.TestCase):
             with self.assertRaises(TypeError):
                 evaluator.evaluate(self._valid_config, "a", "", attr)
 
+    def test_additional_attribute_validation_errors(self):
+        evaluator = Evaluator()
+        config = CompiledConfig.from_dict({
+            "flags": {"test_flag": {"default": False}},
+            "rules": {}
+        })
+
+        # Test additional invalid attribute types to cover missing lines
+        invalid_attributes = [
+            # Non-string key
+            {123: "value"},
+            # Set with mixed types including None
+            {"key": {None, 1}},
+            # Set with tuple elements
+            {"key": {(1, 2), (3, 4)}},
+            # Set with float element (invalid - only str/int allowed)
+            {"key": {1.5}},
+            # Set with mixed int and string types
+            {"key": {1, "string"}},
+        ]
+
+        for attrs in invalid_attributes:
+            with self.subTest(attrs=attrs):
+                with self.assertRaises(TypeError):
+                    evaluator.evaluate(config, "test_flag", "test_id", attrs)
+
     def test_local_evaluator_evaluation(self):
         evaluator = Evaluator()
         cfg = self._valid_config
@@ -130,3 +156,17 @@ class TestEvaluator(unittest.TestCase):
 
         evals = evaluator.pop_evaluations()
         self.assertListEqual(evals, [])
+
+    def test_pop_evaluations_when_disabled(self):
+        """Test pop_evaluations when record_evaluations is False."""
+        # Create evaluator with record_evaluations=False (default)
+        evaluator = Evaluator(record_evaluations=False)
+        cfg = self._valid_config
+
+        # Perform some evaluations
+        evaluator.evaluate(cfg, "a", "test_id", {})
+        evaluator.evaluate(cfg, "a", "test_id2", {})
+
+        # pop_evaluations should return empty list when recording is disabled
+        evaluations = evaluator.pop_evaluations()
+        self.assertEqual(evaluations, [])
