@@ -183,26 +183,6 @@ class TestValidConfig(unittest.TestCase):
                 self.assertEqual(ev.reason, reason)
                 self.assertEqual(ev.rule, rule)
 
-    def test_valid_schedule(self):
-        cases = [
-            # schedule, ts, expected
-            ({"start": "2024-03-12 03:38:20Z", "end": "2024-03-12 03:38:25Z"}, 1710214701, True),
-            ({"start": "2024-03-12 03:38:20Z", "end": "2024-03-12 03:38:25Z"}, 1710214731, False),
-        ]
-        tpl_config = {
-            "flags": {
-                "a": {
-                    "default": False,
-                },
-            },
-        }
-        tpl_rule = {"variants": {"a": True}}
-        for schedule, ts, expected in cases:
-            with self.subTest(f"{schedule}, {ts}"):
-                cc = CompiledConfig_from_dict({**tpl_config, "rules": {"r1": {**tpl_rule, "schedule": schedule}}})
-                ev = cc.flags["a"].eval("", {"__now": ts})
-                self.assertEqual(ev.variant, expected)
-
 
 class TestInvalidConfigs(unittest.TestCase):
     def test_invalid_flag_def(self):
@@ -272,9 +252,6 @@ class TestInvalidConfigs(unittest.TestCase):
             ({"metadata": "abc"}, ValidationError, "."),
             ({"variants": {"a": 2}, "filter": "rule:r1"}, ValueError, "circular"),
             ({"variants": {"a": 2}, "filter": "flag:a = 1"}, ValueError, "circular"),
-            ({"variants": {"a": 2}, "schedule": {"start": "2024-10-10 10:10:10", "end": "2024-10-10 20:20:20"}}, ValueError, "Timezone missing"),
-            ({"variants": {"a": 2}, "schedule": {"start": "2024-10-10 20:10:10Z", "end": "2024-10-10 10:20:20Z"}}, ValueError, "start must be before end"),
-            ({"variants": {"a": 2}, "schedule": {"start": "2024-10-10 10:10:10Z", "end": "2024-10-10 10:10:10Z"}}, ValueError, "start must be before end"),
         ]
 
         for case, expected_err, regex in cases:

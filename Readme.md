@@ -64,8 +64,8 @@ assert ev.evaluate(compiled_config, "enable_feature_X", "user_2", {"user_type": 
 - **Filter**: A boolean expression. It is used to match against the attributes,
   rules, other filters and flags. Both inline and named filters are supported.
 - **Rule**: A rule is evaluated against a target to determine the variants of
-  the feature flags. A rule is made up of a filter, a schedule and a split - all
-  optional. The rule applies if all of its components match.
+  the feature flags. A rule is made up of an optional filter.
+  The rule applies if all of its components match.
 - **Rule Split**: A list of percentages that determine how to split the targets
   into different segments based on the target IDs. For each split, feature flag
   variants can be assigned.
@@ -312,10 +312,6 @@ rule. As an example:
 This is NOT the same as the previous example. Here, we exclude 50% of the
 targets BEFORE we split the remaining into 10%. In other words, we end up
 targetting 10% of 50% which is 5% of the total targets.
-
-### Schedule
-
-TODO
 
 ## Export
 
