@@ -207,7 +207,7 @@ class TestValidConfig(unittest.TestCase):
         b = self._valid_config.to_bytes()
         cc = CompiledConfig.from_bytes(b)
         self.assertSetEqual(set(self._valid_config.flags), set(cc.flags))
-        self.assertEqual(self._valid_config.flags["a"].eval("", {}).variant, cc.flags["a"].eval("", {}).variant)
+        self.assertEqual(self._valid_config.flags["a"].eval({}).variant, cc.flags["a"].eval({}).variant)
 
     def test_valid_const_config(self):
         cases = [
@@ -233,7 +233,7 @@ class TestValidConfig(unittest.TestCase):
 
         for flag, attrs, reason, rule, variant in cases:
             with self.subTest(f"flag={flag}, attrs={attrs}"):
-                ev = self._valid_config.flags[flag].eval("", attrs)
+                ev = self._valid_config.flags[flag].eval(attrs)
                 self.assertEqual(ev.variant, variant)
                 self.assertEqual(ev.reason, reason)
                 self.assertEqual(ev.rule, rule)
