@@ -99,7 +99,7 @@ class TestAttributeOnlyFilters(unittest.TestCase):
                 fs = _FilterSet()
                 fs.parse("f", filter)
                 c = fs.compile("f", {}, {})
-                self.assertEqual(c.eval("", attr), expected)
+                self.assertEqual(c.eval(attr), expected)
 
         valid_syntax_cases = [
             "flag:a > 3",
@@ -208,12 +208,12 @@ class TestAttributeOnlyFilters(unittest.TestCase):
                 fs = _FilterSet()
                 fs.parse("f", f"({filter}) and attr:true")
                 cf = fs.compile("f", {}, {})
-                self.assertFalse(cf.eval("", {**attrs, "true": True}))
+                self.assertFalse(cf.eval({**attrs, "true": True}))
 
                 fs = _FilterSet()
                 fs.parse("f", f"({filter}) or attr:true")
                 cf = fs.compile("f", {}, {})
-                self.assertTrue(cf.eval("", {**attrs, "true": True}))
+                self.assertTrue(cf.eval({**attrs, "true": True}))
 
     def test_invalid_symbol_names(self):
         cases = [
@@ -287,7 +287,7 @@ class TestAttributeOnlyFilters(unittest.TestCase):
         for filter, attr, expected in cases:
             with self.subTest(f"{filter}, {attr}"):
                 c = fs.compile(filter, {}, {})
-                self.assertEqual(c.eval("", attr), expected)
+                self.assertEqual(c.eval(attr), expected)
 
     def test_missing_ref_filter(self):
         fs = _FilterSet()
@@ -314,11 +314,11 @@ class TestAttributeOnlyFilters(unittest.TestCase):
 
         variant_count = [0, 0, 0]
         for id in range(100000):
-            if filter_a.eval("", {"a": id}):
+            if filter_a.eval({"a": id}):
                 variant_count[0] += 1
-            if filter_b.eval("", {"a": id}):
+            if filter_b.eval({"a": id}):
                 variant_count[1] += 1
-            if filter_c.eval("", {"a": id}):
+            if filter_c.eval({"a": id}):
                 variant_count[2] += 1
 
         self.assertEqual(sum(variant_count), 100000)
@@ -338,7 +338,7 @@ class TestAttributeOnlyFilters(unittest.TestCase):
             # Here, we keep the attribute value constant and vary the seed and
             # we expect the same distribution as if we were varying the
             # attribute value.
-            if filter.eval("", {"a": "constant", "__seed": id}):
+            if filter.eval({"a": "constant", "__seed": id}):
                 true_count += 1
             else:
                 false_count += 1

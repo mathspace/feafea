@@ -38,9 +38,9 @@ def _hash_percent(s: str, seed: str = "") -> float:
 
     This is not the most efficient hash function but it's stable.
     Stability of this hash function is CRUCIAL. It's used to hash feature flag
-    names and target IDs to ensure consistent evaluation of feature flags across
+    names and split targets to ensure consistent evaluation of feature flags across
     time, different instances, different python versions, operating systems and
-    so on because the distribution of target IDs depend on it.
+    so on because the distribution of split targets depend on it.
     """
     return (
         int.from_bytes(
@@ -361,7 +361,7 @@ class _CompiledFilter:
     __slots__ = ("eval", "flag_refs", "rule_refs")
 
     # The compiled filter function.
-    eval: Callable[[TargetID, Attributes], bool]
+    eval: Callable[[Attributes], bool]
     # The set of flag names referenced in the filter.
     flag_refs: set[str]
     # The set of rule names referenced in the filter.
@@ -564,7 +564,7 @@ class _FilterSet:
                         # This will therefore never raise an exception.
                         if self._ignore_undefined_refs and sym_name not in defined_flags:
                             return "False"
-                        lhs = f"flags[{sym_name!r}].eval(target_id, attributes).variant"
+                        lhs = f"flags[{sym_name!r}].eval(attributes).variant"
                         if op in {"IN", "NOTIN"}:
                             return f"{lhs} {self._py_op_map[op]} sets[{arg2!r}]"
                         else:
@@ -598,7 +598,7 @@ class _FilterSet:
                         # exists. This will therefore never raise an exception.
                         if self._ignore_undefined_refs and sym_name not in defined_rules:
                             return "False"
-                        lhs = f"rules[{sym_name!r}].eval(target_id, attributes)"
+                        lhs = f"rules[{sym_name!r}].eval(attributes)"
                         return f"{lhs} {self._py_op_map[op]} {arg2!r}"
                     case _:  # pragma: no cover
                         assert False, "unreachable"  # pragma: no cover
@@ -622,7 +622,7 @@ class _FilterSet:
         optimized = self._optimize(inlined)
         py_expr = self._pythonize(optimized, flags, rules)
         code_str = f"""
-def a(target_id, attributes):
+def a(attributes):
     return {py_expr}
 """
         py_code = compile(code_str, "", "exec")
@@ -645,9 +645,6 @@ with open(os.path.join(os.path.dirname(__file__), "config_schema.json")) as f:
     _config_schema = json.load(f)
 
 
-type TargetID = str
-
-
 class _CompiledRule:
     """
     Flag independent compiled rule that evaluates to a boolean indicating
@@ -656,7 +653,7 @@ class _CompiledRule:
 
     __slots__ = ("name", "eval", "_compiled_filter")
     name: str
-    eval: Callable[[TargetID, Attributes], bool]
+    eval: Callable[[Attributes], bool]
     _compiled_filter: _CompiledFilter
 
 
@@ -668,7 +665,7 @@ class _CompiledFlagRule:
 
     __slots__ = ("rule_name", "eval")
     rule_name: str
-    eval: Callable[[TargetID, Attributes], Variant | None]
+    eval: Callable[[Attributes], Variant | None]
 
 
 class CompiledFlag:
@@ -691,13 +688,12 @@ class CompiledFlag:
     _all_rules: dict[str, _CompiledRule]
     _all_flags: dict[str, CompiledFlag]
 
-    def eval(self, target_id: TargetID, attributes: Attributes) -> FlagEvaluation:
+    def eval(self, attributes: Attributes) -> FlagEvaluation:
         e = FlagEvaluation()
         e.default = self.default
         e.flag = self.name
-        e.target_id = target_id
         for rule in self._rules:
-            v = rule.eval(target_id, attributes)
+            v = rule.eval(attributes)
             if v is not None:
                 e.rule = rule.rule_name
                 e.variant = v
@@ -861,11 +857,11 @@ class CompiledConfig:
                 compiled_rule._compiled_filter = cf
                 globals["match"] = cf.eval
                 py_common += [f"attributes['__seed'] = {r.get('split_group', rule_name)!r}"]
-                py_common += ["if not match(target_id, attributes): return None"]
+                py_common += ["if not match(attributes): return None"]
 
             # Compile the flag independent rule.
 
-            lines = ["def a(target_id, attributes):"]
+            lines = ["def a(attributes):"]
             for line in py_common:
                 line = re.sub(r"return None$", "return False", line)
                 lines.append(f"  {line}")
@@ -889,7 +885,7 @@ class CompiledConfig:
                 # Returns variant | None
                 # - variant: The variant evaluated
                 # - None: The rule does not apply
-                lines = ["def a(target_id, attributes):"]
+                lines = ["def a(attributes):"]
                 lines += list(f"  {line}" for line in (py_common + py_lines))
                 lines += ["  return None"]
                 lines_str = "\n".join(lines)
@@ -972,7 +968,7 @@ class FlagEvaluation:
         "flag",
         "variant",
         "default",
-        "target_id",
+        "attributes",
         "rule",
         "reason",
         "timestamp",
@@ -980,7 +976,7 @@ class FlagEvaluation:
     flag: str
     variant: Variant
     default: Variant
-    target_id: str
+    attributes: Attributes
     rule: str | Literal[""]
     reason: Literal["const_rule", "default"]
     timestamp: float
@@ -1042,14 +1038,12 @@ class Evaluator:
         }
         _prom_eval_duration.labels(**labels).observe(dur)
 
-    def detailed_evaluate_all(self, config: CompiledConfig, names: Iterable[str], id: str, attributes: Attributes = {}) -> dict[str, FlagEvaluation]:
+    def detailed_evaluate_all(self, config: CompiledConfig, names: Iterable[str], attributes: Attributes = {}) -> dict[str, FlagEvaluation]:
         """
         Evaluate all flags for the given id and attributes and return
         FlagEvaluations. detailed_evaluate_all is thread-safe.
         """
         assert config._feafea_checksum == _feafea_checksum, "incompatible config"
-        if not isinstance(id, str):
-            raise TypeError(f"id must be a string, not {type(id).__name__}")
         self._validate_attributes_type(attributes)
         merged_attributes = {"__now": time.time(), **attributes}
         now = merged_attributes["__now"]
@@ -1062,7 +1056,8 @@ class Evaluator:
             if flag is None:
                 raise ValueError(f"Flag {name} does not exist in the config")
             start = time.perf_counter()
-            e = flag.eval(id, merged_attributes)
+            e = flag.eval(merged_attributes)
+            e.attributes = merged_attributes
             e.timestamp = now
             dur = time.perf_counter() - start
             self._record_eval_metrics(e, dur)
@@ -1088,19 +1083,18 @@ class Evaluator:
             self._evaluations = []
             return es
 
-    def evaluate(self, config: CompiledConfig, name: str, id: str, attributes: Attributes = {}) -> Variant:
+    def evaluate(self, config: CompiledConfig, name: str, attributes: Attributes = {}) -> Variant:
         """
         Evaluate the given flag. evaluate is thread-safe.
 
         name: The name of the flag.
-        id: The id of the flag.
         attributes: The attributes to evaluate the flag with.
         """
-        return next(iter(self.detailed_evaluate_all(config, [name], id, attributes).values())).variant
+        return next(iter(self.detailed_evaluate_all(config, [name], attributes).values())).variant
 
-    def evaluate_all(self, config: CompiledConfig, names: Iterable[str], id: str, attributes: Attributes = {}) -> dict[str, Variant]:
+    def evaluate_all(self, config: CompiledConfig, names: Iterable[str], attributes: Attributes = {}) -> dict[str, Variant]:
         """
         Evaluate all flags for the given id and attributes. evaluate_all is
         thread-safe.
         """
-        return {n: e.variant for n, e in self.detailed_evaluate_all(config, names, id, attributes).items()}
+        return {n: e.variant for n, e in self.detailed_evaluate_all(config, names, attributes).items()}
