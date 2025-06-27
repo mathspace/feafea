@@ -320,3 +320,67 @@ TODO
 ## Export
 
 TODO
+
+## Testing and Coverage
+
+This project requires **100% test coverage**. The CI pipeline will fail if coverage drops below 100%.
+
+### Running Tests Locally
+
+To run tests with coverage reporting:
+
+```bash
+# Install test dependencies
+pip install pytest pytest-cov coverage
+
+# Run tests with coverage
+python -m pytest tests/ --cov=src/feafea --cov-report=html --cov-report=term-missing
+
+# Generate coverage report
+coverage report --show-missing
+```
+
+### Coverage Requirements
+
+- **Minimum Coverage**: 100%
+- **Branch Coverage**: Enabled
+- **Missing Lines**: Not allowed in CI
+
+### Coverage Report Generation
+
+Use the provided script to generate a detailed coverage report:
+
+```bash
+./scripts/generate_coverage_report.sh
+```
+
+This will:
+- Run all tests with coverage
+- Generate HTML and terminal reports
+- Create a markdown summary (`coverage_report.md`)
+- Open the HTML report showing exactly which lines need coverage
+
+### CI Integration
+
+The GitHub Actions CI workflow:
+- Runs tests with coverage measurement
+- Requires 100% coverage to pass
+- Posts detailed coverage reports as PR comments
+- Uploads HTML coverage reports as artifacts
+- Integrates with Codecov for coverage tracking
+
+### Configuration
+
+Coverage settings are defined in `.coveragerc`:
+- Source directory: `src/feafea`
+- Branch coverage enabled
+- Excludes test files and virtual environments
+- Fails under 100% coverage
+
+### Tips for Achieving 100% Coverage
+
+1. **View HTML Report**: Open `htmlcov/index.html` to see highlighted uncovered lines
+2. **Check Missing Lines**: Use `coverage report --show-missing` to see specific line numbers
+3. **Test Edge Cases**: Ensure all conditional branches are tested
+4. **Handle Exceptions**: Test error conditions and exception paths
+5. **Use Pragmas Sparingly**: Only exclude lines that genuinely can't be tested (already configured in `.coveragerc`)
