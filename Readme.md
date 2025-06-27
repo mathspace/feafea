@@ -165,7 +165,52 @@ Here is a the same rule referencing a named filter:
 
 ### Syntax
 
-TODO
+Filters support a rich expression language with the following syntax:
+
+#### References
+- `attr:attribute_name` - References an attribute passed during evaluation
+- `filter:filter_name` - References a named filter defined in the configuration
+- `flag:flag_name` - References the current value of another feature flag
+
+#### Comparison Operators
+- `=` - Equality
+- `!=` - Inequality  
+- `<`, `<=`, `>`, `>=` - Numeric comparisons
+- `in` - Check if value is in a list
+- `not in` - Check if value is not in a list
+
+#### Logical Operators
+- `and` - Logical AND
+- `or` - Logical OR
+- `not` - Logical NOT (prefix operator)
+
+#### Literals
+- Strings: `'single quoted'` or `"double quoted"`
+- Numbers: `42`, `3.14`
+- Booleans: `true`, `false`
+- Lists: `['item1', 'item2', 3]`
+
+#### Functions
+- `insplit(attr:attribute, min_percent, max_percent)` - Returns true if the attribute value hashes to a percentage between min_percent and max_percent
+
+#### Examples
+```
+attr:user_type = 'premium'
+attr:age >= 18 and attr:country in ['US', 'CA']
+not attr:beta_user
+filter:premium_users or attr:admin = true
+insplit(attr:user_id, 0, 25)
+attr:user_id in ['user1', 'user2'] and flag:other_feature = true
+```
+
+#### Operator Precedence
+1. Function calls
+2. Comparisons (`=`, `!=`, `<`, etc.)
+3. `not`
+4. `and`
+5. `or`
+
+Use parentheses to override precedence: `(attr:a = 1 or attr:b = 2) and attr:c = 3`
 
 ## Rule
 
@@ -181,4 +226,80 @@ priority are evaluated in the lexical order of their names.
 
 ### Splits
 
-TODO
+Splits allow you to roll out feature flags to a percentage of users in a consistent, deterministic way. This is useful for A/B testing, gradual rollouts, and canary deployments.
+
+#### Split Groups
+
+A split group is a named identifier that ensures consistent bucketing across multiple rules. Users are assigned to the same percentage bucket for all rules that use the same split group.
+
+```json
+{
+  "rules": {
+    "experiment_a_treatment": {
+      "filter": "insplit(attr:user_id, 0, 50)",
+      "split_group": "experiment_a",
+      "variants": {
+        "new_feature": true
+      }
+    },
+    "experiment_a_control": {
+      "filter": "insplit(attr:user_id, 50, 100)",
+      "split_group": "experiment_a", 
+      "variants": {
+        "new_feature": false,
+        "analytics_variant": "control"
+      }
+    }
+  }
+}
+```
+
+#### How It Works
+
+1. The `insplit()` function takes an attribute and hashes it to produce a consistent value between 0-99
+2. The function returns `true` if the hash falls within the specified min/max percentage range
+3. The same attribute value will always get the same hash, ensuring consistent splits
+4. Seed of the hash is specified using the `split_group` field in the rule definition
+
+#### Use Cases
+
+**Gradual Rollout:**
+```json
+{
+  "rules": {
+    "gradual_rollout": {
+      "filter": "insplit(attr:user_id, 0, 25)",
+      "variants": {
+        "new_algorithm": true
+      }
+    }
+  }
+}
+```
+
+**A/B Testing:**
+```json
+{
+  "rules": {
+    "variant_a": {
+      "filter": "insplit(attr:user_id, 0, 33)",
+      "variants": {
+        "ui_style": "A"
+      }
+    },
+    "variant_b": {
+      "filter": "insplit(attr:user_id, 33, 66)",
+      "variants": {
+        "ui_style": "B"
+      }
+    }
+  }
+}
+```
+
+#### Best Practices
+
+- Use descriptive split group names that indicate the experiment or rollout
+- Keep percentage splits consistent within the same split group
+- Consider using the `split_group` field in rule definitions for documentation
+- Remember that ranges are inclusive of min and exclusive of max (e.g., `insplit(attr:user_id, 0, 25)` includes 0-24)
