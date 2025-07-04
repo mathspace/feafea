@@ -824,15 +824,11 @@ class CompiledConfig:
 
             referenced_variants = set((flag, variant) for flag, variant in r.get("variants", {}).items())
 
-            # Remove any referenced variants that are not defined in the config.
-            referenced_variants = {rv for rv in referenced_variants if rv[0] in flags}
-
-            if referenced_variants - all_variants:
-                raise ValueError(f"unknown flag/variant in rule {rule_name}")
+            valid_variants = referenced_variants.intersection(all_variants)
 
             # Rule compilation.
 
-            py_flag = {f: [] for f in set(flag for flag, _ in referenced_variants)}
+            py_flag = {f: [] for f in set(flag for flag, _ in valid_variants)}
             py_common = []
 
             globals: dict[str, Any] = {
@@ -869,7 +865,8 @@ class CompiledConfig:
             # Compile the flag dependent rules.
 
             for flag, variant in r.get("variants", {}).items():
-                if flag in py_flag:  # Only process flags that exist in py_flag dict
+                # Only process flag/variant combo that's valid
+                if (flag, variant) in valid_variants:
                     py_flag[flag].append(f"return {variant!r}")
 
             for flag, py_lines in py_flag.items():
