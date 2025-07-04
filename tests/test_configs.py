@@ -139,6 +139,9 @@ class TestValidConfig(unittest.TestCase):
                     "gg": {
                         "alias": "g",
                     },
+                    "hh": {
+                        "default": False,
+                    }
                 },
                 "filters": {
                     "f1": "attr:at1 in [5,6,7]",
@@ -207,13 +210,25 @@ class TestValidConfig(unittest.TestCase):
                         "variants": {
                             "nonexistent": "apply",
                         }
+                    },
+                    "r11": {
+                        "filter": "attr:nonexistent",
+                        "variants": {
+                            "hh": True,
+                        },
+                    },
+                    "r12": {
+                        "filter": "attr:be_bad",
+                        "variants": {
+                            "hh": "badvariant",
+                        }
                     }
                 },
             },
         )
 
     def test_valid_config_high_level(self):
-        self.assertSetEqual(set(self._valid_config.flags), {"a", "b", "c", "cc", "d", "e", "f", "g", "h", "gg"})
+        self.assertSetEqual(set(self._valid_config.flags), {"a", "b", "c", "cc", "d", "e", "f", "g", "h", "gg", "hh"})
         self.assertDictEqual(self._valid_config.flags["a"].metadata, {"category": "simple", "deprecated": False, "revision": 22})
         self.assertEqual(self._valid_config.flags["a"].name, "a")
         self.assertTrue(self._valid_config.flags["a"].type is bool)
@@ -246,14 +261,15 @@ class TestValidConfig(unittest.TestCase):
             ("cc", {"at1": 5}, "const_rule", "r5", "med"),  # alias of c
             ("gg", {}, "const_rule", "r9", 9),
             ("g", {}, "const_rule", "r9", 9),  # setting rule against alias sets it against the original flag
+            ("hh", {"be_bad": True}, "default", "", False), # rule r11 has invalid variant
         ]
 
         for flag, attrs, reason, rule, variant in cases:
             with self.subTest(f"flag={flag}, attrs={attrs}"):
                 ev = self._valid_config.flags[flag].eval(attrs)
-                self.assertEqual(ev.variant, variant)
-                self.assertEqual(ev.reason, reason)
-                self.assertEqual(ev.rule, rule)
+                self.assertEqual(ev.variant, variant, msg=f"flag={flag}, attrs={attrs}")
+                self.assertEqual(ev.reason, reason, msg=f"flag={flag}, attrs={attrs}")
+                self.assertEqual(ev.rule, rule, msg=f"flag={flag}, attrs={attrs}")
 
 
 class TestInvalidConfigs(unittest.TestCase):
@@ -318,7 +334,6 @@ class TestInvalidConfigs(unittest.TestCase):
 
         cases = [
             ({}, ValidationError, "."),
-            ({"variants": {"a": 4}}, ValueError, "unknown flag/variant"),  # non-existing variant
             ({"split_group": 12}, ValidationError, "."),
             ({"variants": {"a": 4}, "split_group": 12}, ValidationError, "."),  # cannot combine split_group with variants
             ({"metadata": "abc"}, ValidationError, "."),
