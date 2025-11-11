@@ -10,8 +10,9 @@ import jsonschema
 import threading
 from collections.abc import Callable
 from collections import defaultdict
-from typing import Any, Iterable, Literal, Mapping, Set
+from typing import Any, Literal, TypedDict
 from hashlib import md5
+from collections.abc import Iterable, Mapping, Set
 
 from prometheus_client import Histogram
 
@@ -23,6 +24,51 @@ type AttributeSet = Set[str] | Set[int]
 type AttributeValue = None | str | bool | int | float | AttributeSet
 type Attributes = Mapping[str, AttributeValue]
 type DictConfig = Mapping[str, Any]
+
+# TypedDict definitions with required and optional fields properly separated
+# These can be imported in repos where feafea is used
+class FlagMetadataRequired(TypedDict):
+    """Required metadata fields that are always present after validation."""
+
+    description: str
+    created_at: str
+    url: str
+    state: Literal["new", "in-use", "deprecated", "removed"]
+
+
+class FlagMetadataOptional(TypedDict, total=False):
+    """Optional metadata fields."""
+
+    deprecated_at: str
+    deprecated_reason: str
+
+
+class FlagMetadata(FlagMetadataRequired, FlagMetadataOptional):
+    """Complete metadata combining required and optional fields."""
+
+    pass
+
+
+class FlagSpecRequired(TypedDict):
+    """Required flag spec fields that are always present after validation."""
+
+    default: bool | int | str
+    metadata: FlagMetadata
+
+
+class FlagSpecOptional(TypedDict, total=False):
+    """Optional flag spec fields."""
+
+    variants: list[bool | int | str]
+
+
+class FlagSpec(FlagSpecRequired, FlagSpecOptional):
+    """Complete flag spec combining required and optional fields."""
+
+    pass
+
+
+ConfigDict = dict[str, FlagSpec]  # Maps flag name to flag spec
 
 
 # HACK: Use checksum of this file as the version for calculating the checksum
